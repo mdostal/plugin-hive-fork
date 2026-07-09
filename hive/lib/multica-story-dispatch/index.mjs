@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 const HTTP_TIMEOUT_MS = 30_000;
 const USER_AGENT = 'hive-multica-story-dispatch/0.1.0';
 const SQUAD_OUTCOME_VALUES = new Set(['action', 'no_action', 'failed']);
+const MULTICA_RUNTIME_PREFIX = 'multica:';
 // Safety bound on timeline pagination so a misbehaving/looping API can never
 // spin forever. 50 pages is far beyond any realistic issue timeline length.
 const MAX_TIMELINE_PAGES = 50;
@@ -150,6 +151,25 @@ export function __resetCache() {
   AGENT_CACHE.clear();
 }
 
+// Normalize a raw agent_backends entry to a canonical backend token.
+// 'opencode' is a convenience alias for 'multica:opencode'.
+// Returns one of: 'claude' | 'codex' | 'multica:<runtime>'
+// Unknown or absent values fall back to 'claude'.
+function resolveBackend(rawBackend) {
+  if (rawBackend == null) return 'claude';
+  const s = String(rawBackend).trim();
+  if (s === 'opencode') return `${MULTICA_RUNTIME_PREFIX}opencode`;
+  if (s === 'claude' || s === 'codex' || s.startsWith(MULTICA_RUNTIME_PREFIX)) return s;
+  return 'claude';
+}
+
+// Exported resolution helper: look up a persona in agent_backends and return
+// its canonical backend token. Use this in tests and in callers that need the
+// resolved value without going through the full brief-serialization path.
+export function resolvePersonaBackend(persona, agentBackends = {}) {
+  return resolveBackend(agentBackends?.[persona]);
+}
+
 function resolveCodexInstruction(options) {
   const { codexInstruction = false, dispatchingPersona, agents, agentBackends } = options;
   if (dispatchingPersona !== undefined && dispatchingPersona !== null) {
@@ -158,7 +178,7 @@ function resolveCodexInstruction(options) {
       : null;
     const effectiveProvider = entry?.provider ?? 'claude';
     if (effectiveProvider === 'codex') return false;
-    return agentBackends?.[dispatchingPersona] === 'codex';
+    return resolveBackend(agentBackends?.[dispatchingPersona]) === 'codex';
   }
   return codexInstruction;
 }
