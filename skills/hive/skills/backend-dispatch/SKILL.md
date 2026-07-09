@@ -44,13 +44,22 @@ Supported backends: `claude` | `codex` | `multica:<runtime>` (e.g. `multica:open
 If the resolved backend is `codex`:
 
 - Record the backend in the episode record (for future cost/bias telemetry).
-- Resolve `pane_mode` from the caller: `one-shot` (default) or `persistent`.
-  - `one-shot`: open pane, send prompt, capture output, close pane (standard).
-  - `persistent`: two sub-modes depending on whether `existing_surface_id` is provided:
-    - **No surface_id (initial):** open pane, start codex interactive, return `surface_id` to caller. Do NOT send the task prompt or close the pane.
-    - **Surface_id provided (follow-up):** send the prompt to the existing pane, poll for completion, capture output. Do NOT close the pane.
-- Build the full prompt structure from `prompt_parts` exactly as the agent-spawn prompt-layout reference describes for one-shot mode and persistent follow-up mode. Skip prompt building for persistent initial mode because that call only opens the pane and returns `surface_id`.
-- Do NOT call `Agent` directly. Delegate to the `codex-invoke` skill with the built prompt, `pane_mode`, and optional `existing_surface_id`. Return its report as `dispatch_result`. All subsequent steps in the caller (respawn continuation, episode reporting) still apply — codex-invoke is the dispatch surface, not a replacement for the surrounding procedure.
+- Build the full prompt string from `prompt_parts` exactly as the agent-spawn prompt-layout reference describes.
+- Dispatch via `hive/lib/codex-backend.mjs` → `runCodexExec(prompt, opts)`:
+  - **No cmux dependency.** Do NOT open a visible pane. Do NOT invoke the `codex-invoke` skill. The headless path shells directly to the local `codex` binary as a subprocess.
+  - **Non-interactive invocation form** (verified against v0.143.0, DOS-334):
+    ```
+    codex exec --json --ephemeral --skip-git-repo-check [--sandbox <mode>] [-C <workDir>] "<prompt>"
+    ```
+    - `--json` — emits JSONL events; required for headless parsing (bare `codex exec` hangs ~2 min without it).
+    - `--ephemeral` — no session files written to disk.
+    - `--skip-git-repo-check` — allows execution outside a git repository.
+    - `--sandbox <mode>` — optional: `read-only` (default safe), `workspace-write`, or `danger-full-access`.
+    - `-C <workDir>` — pass the story's working directory when available.
+  - The JSONL event stream is parsed: `thread.started`, `item.completed` (agent_message / command_execution), and `turn.completed` events are captured.
+  - `runCodexExec` returns a `terminal` object in the episode-record shape (`status`, `notes`, `messages`, `task_id: null`, `agent_id: null`, `agent_name`, `work_dir`, `attempts: 1`, `started_at`, `completed_at`, plus codex-specific extras `thread_id`, `usage`).
+- Pass the returned `terminal` directly to `writeMulticaRunEpisode` (episode-sync.mjs) as the episode record — same path as the claude and multica branches.
+- Return `dispatch_result` with `dispatch_decision: 'codex-exec-headless'` and the `terminal` object.
 
 ### Step 3: Claude branch
 
