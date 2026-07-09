@@ -2,6 +2,9 @@
   "name": "plugin-hive",
   "private": true,
   "description": "Root dependency manifest for Hive's named Node bridge surfaces.",
+  "scripts": {
+    "approval-server": "node hive/lib/approval/server.mjs"
+  },
   "engines": {
     "node": ">=20.19"
   },
