@@ -59,8 +59,8 @@ class ToolGatingError(ExecutorError):
 class PlatformIncompatibilityError(ToolGatingError):
     """Step requested a tool whose platform constraint is unmet.
 
-    Raised when a workflow step references a macOS-only tool (codex,
-    cmux) on a non-Darwin platform. No silent fallback — Risk #11
+    Raised when a workflow step references a macOS-only tool (codex)
+    on a non-Darwin platform. No silent fallback — Risk #11
     mitigation per epic.yaml.
     """
 

@@ -31,7 +31,7 @@ If the kickoff checks pass, proceed silently. Only surface kickoff-related outpu
 
 | Scope | Tool | Why |
 |---|---|---|
-| **Parallelizing stories across the epic** | Natural-language team description or cmux panes | Stories run as named teammates described in the team prompt — one teammate per story — or in separate cmux panes when `execution.terminal_mux: cmux`. Parallel teammates are the default for eligible story sets; `execution.parallel_teams: false` or `--sequential` forces sequential execution. |
+| **Parallelizing stories across the epic** | Natural-language team description | Stories run as named teammates described in the team prompt — one teammate per story. Parallel teammates are the default for eligible story sets; `execution.parallel_teams: false` or `--sequential` forces sequential execution. |
 | **Sequential workflow steps within a single story** | `Agent` | Steps within a teammate's pane run inline — this is correct |
 | **Specialist phase teams (pre-exec, post-exec)** | Natural-language team description | Specialist teams are independent coordination units — describe each as a named teammate in the team prompt |
 
@@ -156,7 +156,7 @@ Describe each story as a named teammate in the team prompt; the runtime material
 
    When `gate_violations[]` is non-empty, the dispatch has been downgraded to `sequential` by the parallel-dispatch gate (`ed-7`). Surface the warning to stdout naming every offending story ID and the reason recorded by the gate (the structured format is documented in `execute-dispatch/SKILL.md` Step 1.5). Do not re-implement the gate logic here — the dispatch skill is the single boundary for this decision per the parallel-call-sites registry (`hive/references/parallel-call-sites.md`).
 
-   Switch `mode_decision`: `sessions` -> step 6c, `team-cmux` -> step 6b, `team` -> step 6, `sequential` -> step 7, `sandcastle` -> step 6d, `multica` -> step 5e, `cc-workflows` -> step 6f.
+   Switch `mode_decision`: `sessions` -> step 6c, `team` -> step 6, `sequential` -> step 7, `sandcastle` -> step 6d, `multica` -> step 5e, `cc-workflows` -> step 6f.
 5pre. **Executor cutover routing.** Use only the returned `runner_path` and `runner_reason`; do not re-evaluate the cutover tree here. If `runner_path == hive-dag`, call `hive.lib.dag_executor.run_workflow(workflow_path, dispatcher, run_state_path=..., worktree_manager=...)`; otherwise continue on the orchestrator-narrated path. Single dispatch point: this skill call is the only `/execute` policy boundary for executor-vs-orchestrator routing.
 
 5e. **DAG/Multica front-door dispatch.** Reached when `mode_decision == multica`. Route each story through the DAG run entrypoint with the Multica binding. This is the symmetric sibling of the planning-routing DAG front-door path (s9).
@@ -200,17 +200,9 @@ Graph completion is an **artifact-readiness signal only** — not a per-story do
 - Daemon down (ECONNREFUSED, timeout during `binding=multica` init): emit `[warn] execute routing: dag-multica daemon down for story={story_id} — falling back to local` and route that story through step 7 (sequential) with the local executor.
 - Dispatch error (graph-step error, node timeout): emit `[warn] execute routing: dag-multica dispatch failed for story={story_id}: {error} — falling back to local` and apply the same local fallback.
 
-**Local fallback (backend unset).** When `mode_decision != multica`, this step is skipped entirely. Existing paths (sessions → 6c, team-cmux → 6b, team → 6, sequential → 7, sandcastle → 6d, cc-workflows → 6f) are unchanged — no regression.
+**Local fallback (backend unset).** When `mode_decision != multica`, this step is skipped entirely. Existing paths (sessions → 6c, team → 6, sequential → 7, sandcastle → 6d, cc-workflows → 6f) are unchanged — no regression.
 
 6. **Agent team execution.** Follow **`references/team-execution.md`** for the full `Agent(name:)` prompt template, per-story commit pattern, sidecar injection for append-placement triggers, and respawn monitoring.
-
-6b. **Agent team execution (cmux path).** Use this path when all four step-5 conditions are true and `execution.terminal_mux` resolves to `cmux`.
-   Invoke `skills/hive/skills/execute-mode-team-cmux/SKILL.md` with:
-   - `workflow_path`: the workflow loaded in step 3
-   - `unblocked_stories[]`: the depth-0 ready stories from the topological sort
-   - `appends_map`: the review-phase sidecar map from step 2b
-   - `epic_handle`: the current epic identifier
-   See `references/team-execution.md` for cmux-variant `Agent(name:)` prompt details.
 
 6c. **Session-based execution** (used when `HIVE_SESSIONS_ENABLED` or `sessions.enabled: true`). Replaces the `Agent(name:)` path with the Claude Agent SDK `/v1/sessions` API for story-level execution.
    Invoke `skills/hive/skills/execute-mode-session/SKILL.md` with:
@@ -469,7 +461,7 @@ Graph completion is an **artifact-readiness signal only** — not a per-story do
 
    2. **Post-run audit** — scan this run's resolved state per `hive/references/gate-lift-telemetry.md`:
       - `gate_lift_fired` (true if step 1 took the warning branch and synthesized an ad-hoc plan)
-      - `backend_resolution` sources (collected from the `execute-dispatch` sub-skill invoked at step 5 per a-34 Sane Default Resolution; map of `sessions_enabled`, `parallel_teams`, `terminal_mux`, `executor` → `flag|env|hive-config|default`)
+      - `backend_resolution` sources (collected from the `execute-dispatch` sub-skill invoked at step 5 per a-34 Sane Default Resolution; map of `sessions_enabled`, `parallel_teams`, `executor` → `flag|env|hive-config|default`)
       - methodology (resolved value + source)
       - work artifacts (commits made, files modified during the run)
 
@@ -482,7 +474,7 @@ Graph completion is an **artifact-readiness signal only** — not a per-story do
 
    5. Always write the audit record to `${HIVE_STATE_DIR}/audits/post-run/<run-id>.yaml` (create the directory if absent). Same schema as `skills/plan/SKILL.md` step 20, with two differences:
       - `skill: execute`
-      - additional field `backend_sources` mapping `sessions_enabled`, `parallel_teams`, `terminal_mux`, `executor` to their resolved source.
+      - additional field `backend_sources` mapping `sessions_enabled`, `parallel_teams`, `executor` to their resolved source.
 
    6. Silent on healthy runs (no stdout warning when zero heuristics fire) — YAML record still written with empty `nonsensical_defaults: []` for cross-run aggregation by `hive/scripts/gate-mode-audit.mjs`.
 

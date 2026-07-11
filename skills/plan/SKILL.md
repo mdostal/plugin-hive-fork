@@ -626,12 +626,12 @@ If `.pHive/CONTEXT.md` is absent, grill still runs but with reduced fidelity (si
         change: extract ClusterHeaderConfig
     # ---
     # 3. Bounded-slice — narrow declared write surface, disjoint from peers
-    id: cmux-add-logging-hook
-    depends_on: [cmux-pane-spawn-base]
+    id: terminal-logging-hook
+    depends_on: [agent-spawn-base]
     parallel_allowed: true
     parallel_rationale: bounded-slice
     files_to_modify:
-      - file: hive/lib/cmux/pane_hooks.mjs
+      - file: hive/lib/agent/hooks.mjs
         change: register new "log" hook
     ```
 

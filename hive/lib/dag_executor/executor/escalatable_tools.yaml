@@ -44,7 +44,6 @@ escalatable:
   - Write
   - NotebookEdit
   - codex
-  - cmux
 
 # Verifier personas are pinned to Opus precisely so they cross-verify
 # Codex output. A step-level `tools: [codex]` override on a verifier
@@ -52,10 +51,6 @@ escalatable:
 # is meant to verify. See `feedback_codex_general_backend.md`.
 persona_deny:
   codex:
-    - reviewer
-    - peer-validator
-    - security-reviewer
-  cmux:
     - reviewer
     - peer-validator
     - security-reviewer

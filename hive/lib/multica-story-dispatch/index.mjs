@@ -153,13 +153,15 @@ export function __resetCache() {
 
 // Normalize a raw agent_backends entry to a canonical backend token.
 // 'opencode' is a convenience alias for 'multica:opencode'.
-// Returns one of: 'claude' | 'codex' | 'multica:<runtime>'
+// 'codex' is a convenience alias for 'multica:codex'.
+// Returns one of: 'claude' | 'multica:<runtime>'
 // Unknown or absent values fall back to 'claude'.
 function resolveBackend(rawBackend) {
   if (rawBackend == null) return 'claude';
   const s = String(rawBackend).trim();
   if (s === 'opencode') return `${MULTICA_RUNTIME_PREFIX}opencode`;
-  if (s === 'claude' || s === 'codex' || s.startsWith(MULTICA_RUNTIME_PREFIX)) return s;
+  if (s === 'codex') return `${MULTICA_RUNTIME_PREFIX}codex`;
+  if (s === 'claude' || s.startsWith(MULTICA_RUNTIME_PREFIX)) return s;
   return 'claude';
 }
 
@@ -178,7 +180,7 @@ function resolveCodexInstruction(options) {
       : null;
     const effectiveProvider = entry?.provider ?? 'claude';
     if (effectiveProvider === 'codex') return false;
-    return resolveBackend(agentBackends?.[dispatchingPersona]) === 'codex';
+    return false;
   }
   return codexInstruction;
 }
@@ -238,7 +240,7 @@ export function serializeStoryBrief(story, options = {}) {
 
   if (showCodexInstruction) {
     sections.push(
-      `## Use /codex:rescue\nThis story is routed through the Codex backend. For implementation work, invoke the /codex:rescue skill with the story spec from this brief rather than writing code directly. Return changes for the orchestrator to commit.`,
+      `## Use /codex:rescue\nThis story is routed through the legacy Codex rescue adapter. For implementation work, invoke the /codex:rescue skill with the story spec from this brief rather than writing code directly. Return changes for the orchestrator to commit.`,
     );
   }
 

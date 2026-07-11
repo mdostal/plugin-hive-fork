@@ -2,7 +2,7 @@
 
 > `${HIVE_STATE_DIR}` resolves from `paths.state_dir` in the ROOT `hive.config.yaml` at runtime (not from the shipped baseline `hive/hive.config.yaml`). Default: `.pHive`.
 >
-> **Parallel-dispatch gate (ed-7):** `Agent(name:)` (this section) and the cmux variant (below) are two of the four in-scope dispatch points for the parallel gate. Each story listed in the prompt must already carry the `parallel_allowed: true` + `parallel_rationale ∈ {variation, read-only, bounded-slice}` pair emitted by `/plan` Phase C step 13, with `bounded-slice` stories declaring disjoint `files_to_modify[]`. The gate runs in `execute-dispatch` Step 1.5 *before* this section's prompt is generated — by the time you arrive here, the depth-0 `unblocked_stories[]` set has already been validated and `mode_decision` was downgraded to `sequential` on any violation. See [`hive/references/parallel-call-sites.md`](../../../hive/references/parallel-call-sites.md) §2 for the catalog of in-scope sites.
+> **Parallel-dispatch gate (ed-7):** `Agent(name:)` is the in-scope local team dispatch point for the parallel gate. Each story listed in the prompt must already carry the `parallel_allowed: true` + `parallel_rationale ∈ {variation, read-only, bounded-slice}` pair emitted by `/plan` Phase C step 13, with `bounded-slice` stories declaring disjoint `files_to_modify[]`. The gate runs in `execute-dispatch` Step 1.5 *before* this section's prompt is generated — by the time you arrive here, the depth-0 `unblocked_stories[]` set has already been validated and `mode_decision` was downgraded to `sequential` on any violation. See [`hive/references/parallel-call-sites.md`](../../../hive/references/parallel-call-sites.md) §2 for the catalog of in-scope sites.
 
 Describe each story as a named teammate in the team prompt — one teammate per story, each carrying ONLY that story's scope. Never combine two or more stories into a single teammate's scope description. The runtime materializes teammates automatically from the natural-language team description; parallel execution is the default for eligible story sets; `execution.parallel_teams: false` or `--sequential` forces sequential execution. Generate a natural-language prompt per story that describes that single story's task:
 
@@ -68,56 +68,6 @@ The orchestrator monitors active teammates for context degradation signals durin
 
 Ensure `${HIVE_STATE_DIR}/respawn-summaries/` exists before epic execution begins (create if needed).
 
-## cmux Team Execution Variant
+## Completion Tracking
 
-When active: `execution.terminal_mux` resolves to `cmux` (explicit setting, or `auto` with cmux detected).
-
-Dispatch: same as the auto-spawn path — the orchestrator loops through stories — but delivers each story prompt to a cmux pane via agent-spawn instead.
-
-- Topologically sorted stories with no unmet dependencies are spawned immediately.
-- Each spawn goes through the agent-spawn skill (section 7.3), which opens a cmux pane, launches `claude` in interactive mode, and delivers the prompt.
-- Agent-spawn returns a `surface_id`; the orchestrator records it in the tracking map.
-
-Tracking map:
-
-```
-{story_id: {surface_id, status: pending|active|complete|failed, depends_on: [...]}}
-```
-
-Poll loop (replaces `Agent(name:)`'s internal monitoring):
-
-```
-Every 10 seconds:
-  for each active surface:
-    - First check for the s1 SubagentStop marker:
-      ${HIVE_STATE_DIR}/agent-complete/<agent_id>/complete.json
-      If present: mark complete/failed per its `verdict`, check dependents,
-      and skip the scrollback scan for this surface this tick.
-    - Otherwise (no marker yet — event-driven completion supersedes the
-      timer for Agent(name:)-dispatched work, but the scan stays as the
-      bounded fallback so a hook failure or crashed agent can't hang the
-      loop): cmux read-screen --surface <id> --scrollback
-      - Search output for [STORY-COMPLETE:{story-id}]
-      - Persist last-read line count per surface to avoid reprocessing
-      - If marker found: mark complete, check dependents
-      - If surface.health fails: mark failed, capture scrollback, log error
-```
-
-**Carve-out (do NOT try to fix):** a story dispatched via Bash `run_in_background` has no completion hook in this runtime — `SubagentStop` never fires for it, so no `complete.json` is ever written. Tracking for a Bash-bg story MUST keep using the scrollback scan (or an equivalent poll) unconditionally; only `Agent(name:)`/cmux `Agent(name:)`-dispatched work is eligible for the marker fast path above.
-
-Dependency unblocking: when `story-a` completes, scan the tracking map for stories whose `depends_on` lists are now fully satisfied, then spawn those stories.
-
-Messaging: the orchestrator can send messages to any active pane.
-
-- Respawn signal: `cmux send --surface <id> "Your context is degrading. Write a respawn summary to ${HIVE_STATE_DIR}/respawn-summaries/{story-id}.md and exit."`
-- Sidecar injection: `cmux send --surface <id> "Also spawn {agent-name} as a sidecar for the review step. Read hive/agents/{agent-name}.md."`
-
-Completion marker convention: agents must emit `[STORY-COMPLETE:{story-id}]` as the last line of their workflow output. Add this to the per-story prompt template.
-
-Cleanup: after all stories complete, close all surfaces: `cmux close-surface --surface <id>` for each tracked surface.
-
-Sidecar injection: same logic as the `Agent(name:)` variant. Check the story→sidecar_agents map and append sidecar instructions to the story prompt before spawn.
-
-Per-story commits: same as the `Agent(name:)` variant. Stories commit independently on feature branches.
-
-Respawn monitoring: same detection heuristics, but use `surface.send_text` for the respawn signal and `surface.read_text` plus `surface.health` for monitoring and liveness.
+The local team path relies on the runtime-managed `Agent(name:)` completion contract and the issue/episode markers emitted by the orchestrator. Bash `run_in_background` remains a carve-out with no `SubagentStop` hook; tracking for that path must use the existing explicit poll or marker mechanism.

@@ -1,31 +1,31 @@
 ---
 name: backend-dispatch
-description: Resolve the model-provider backend (Claude vs Codex) for an agent spawn and route to the correct dispatch surface. Inherits the caller's model and persona context.
+description: Resolve the model-provider backend for an agent spawn and route to the correct dispatch surface. Inherits the caller's model and persona context.
 ---
 
 # Hive Backend Dispatch
 
-Atomic skill, NOT inline agent-spawn prose. Resolves which provider serves a given persona spawn and selects the dispatch surface (Messages-API substrate, tmux fallback, or codex-invoke). The caller still builds the spawn prompt and owns the surrounding procedure (respawn handling, episode reporting); this skill only owns the resolution + dispatch handoff.
+Atomic skill, NOT inline agent-spawn prose. Resolves which provider serves a given persona spawn and selects the dispatch surface (Messages-API substrate, tmux fallback, or Multica issue assignment). The caller still builds the spawn prompt and owns the surrounding procedure (respawn handling, episode reporting); this skill only owns the resolution + dispatch handoff.
 
 ## Invocation contract
 
-Call this skill after `memory-loading` returned `prior_knowledge_block` and the caller has assembled the full prompt structure, but BEFORE invoking the actual `Agent`/`codex-invoke` surface.
+Call this skill after `memory-loading` returned `prior_knowledge_block` and the caller has assembled the full prompt structure, but BEFORE invoking the actual `Agent` or Multica assignment surface.
 
 **Inputs:**
 - `persona_context` — output of `persona-resolve` (carries `agent_name`, `frontmatter.model`).
 - `agent_backends` — `agent_backends.*` map from root `hive.config.yaml`.
 - `backend_override` — optional explicit override the caller passed in (highest precedence).
-- `prompt_parts` — assembled `{persona_text, domain_note, prior_knowledge_block, skills, continuation_context, task}` parts. Some surfaces concatenate; cmux variants split across system + task files (see `hive/references/agent-spawn-prompt-layout.md` for the canonical split, owned by agent-spawn proper).
+- `prompt_parts` — assembled `{persona_text, domain_note, prior_knowledge_block, skills, continuation_context, task}` parts. Claude dispatch concatenates them for `Agent(name:)`; native runtime dispatch hands them through the Multica issue assignment brief.
 - `caller_mode` — caller's invocation context: `team-execution` or `standalone`.
-- `pane_mode` — `one-shot` (default) or `persistent` (only relevant when resolved backend is `codex`).
-- `existing_surface_id` — only used when `pane_mode == persistent`.
+- `pane_mode` — deprecated; native runtime backends ignore pane mode.
+- `existing_surface_id` — deprecated; native runtime backends do not reuse terminal surfaces.
 
 **Outputs:**
-- `resolved_backend` enum `claude | codex | multica:<runtime>` (e.g. `multica:opencode`, `multica:gemini`).
-- `dispatch_decision` — record of the chosen surface: `messages-api`, `tmux-fallback`, `codex-invoke-one-shot`, `codex-invoke-persistent-initial`, `codex-invoke-persistent-followup`, or `multica-issue-assign`.
+- `resolved_backend` enum `claude | multica:<runtime>` (e.g. `multica:codex`, `multica:opencode`, `multica:gemini`).
+- `dispatch_decision` — record of the chosen surface: `messages-api`, `tmux-fallback`, or `multica-issue-assign`.
 - `dispatch_result` — the report returned by whichever surface was invoked.
 
-**Side effects:** episode record write (when backend is codex, log the backend for future cost/bias telemetry; for `multica:<runtime>`, log the runtime tag).
+**Side effects:** episode record write for `multica:<runtime>` backends, logging the runtime tag for future cost/bias telemetry.
 
 ## Process
 
@@ -37,20 +37,18 @@ Decide which backend serves this spawn. Resolution order, first match wins:
 2. `agent_backends.{persona_context.agent_name}` from root `hive.config.yaml` (consumer override layer; falls back to `hive/hive.config.yaml`). Matches the input-section contract at line 16. Normalize the resolved value: `opencode` is a convenience alias for `multica:opencode`.
 3. Default: `claude`.
 
-Supported backends: `claude` | `codex` | `multica:<runtime>` (e.g. `multica:opencode`, `multica:gemini`). The `opencode` short-form is accepted in config and treated as `multica:opencode` at resolution time.
+Supported backends: `claude` | `codex` | `multica:<runtime>` (e.g. `multica:codex`, `multica:opencode`, `multica:gemini`). The `codex` and `opencode` short-forms are accepted in config and treated as `multica:codex` and `multica:opencode` at resolution time.
 
-### Step 2: Codex branch
+### Step 2: Native runtime branch
 
-If the resolved backend is `codex`:
+If the resolved backend matches `multica:<runtime>` (including `multica:codex`):
 
-- Record the backend in the episode record (for future cost/bias telemetry).
-- Resolve `pane_mode` from the caller: `one-shot` (default) or `persistent`.
-  - `one-shot`: open pane, send prompt, capture output, close pane (standard).
-  - `persistent`: two sub-modes depending on whether `existing_surface_id` is provided:
-    - **No surface_id (initial):** open pane, start codex interactive, return `surface_id` to caller. Do NOT send the task prompt or close the pane.
-    - **Surface_id provided (follow-up):** send the prompt to the existing pane, poll for completion, capture output. Do NOT close the pane.
-- Build the full prompt structure from `prompt_parts` exactly as the agent-spawn prompt-layout reference describes for one-shot mode and persistent follow-up mode. Skip prompt building for persistent initial mode because that call only opens the pane and returns `surface_id`.
-- Do NOT call `Agent` directly. Delegate to the `codex-invoke` skill with the built prompt, `pane_mode`, and optional `existing_surface_id`. Return its report as `dispatch_result`. All subsequent steps in the caller (respawn continuation, episode reporting) still apply — codex-invoke is the dispatch surface, not a replacement for the surrounding procedure.
+- Record the runtime tag in the episode record (for future cost/bias telemetry).
+- Do NOT open a terminal pane. Do NOT invoke the Messages-API or tmux substrate. Dispatch exclusively through the **Multica CLI substrate** (issue assignment via `multica issue update --assignee`).
+- The persona's story brief MUST NOT include a `/codex:rescue` instruction — the assigned agent is a native Multica agent that already knows its own runtime.
+- Assign the story issue to the agent persona's Multica agent UUID via `dispatchStoryToAgent`. Return `dispatch_decision=multica-issue-assign`.
+- The dispatched agent runs on the Multica runtime identified by `<runtime>` (e.g. Codex, Opencode, Gemini) and posts its result as a comment on the story issue, which the orchestrator picks up through the existing episode-record path.
+- Return `dispatch_result` with the standard envelope shape (`carrier`, `dispatches`, `dispatch_decision`).
 
 ### Step 3: Claude branch
 
@@ -60,15 +58,4 @@ If the resolved backend is `claude`, use this flow in order:
 2. **Messages-API substrate by default:** when the capability-check passes, route the spawn through `hive/lib/messages-session.js`. This is the default Claude path for direct story-level dispatch because it keeps the spawn on the Messages-API loop instead of opening a tmux pane first. Return `dispatch_decision=messages-api`.
 3. **tmux fallback when client init fails:** if the Messages-API client init fails, log the failure and fall back to the existing tmux `Agent(name:)` path. Do not modify the prompt shape during fallback; only the transport changes. Return `dispatch_decision=tmux-fallback`.
 
-Note: the cmux variant (visible split panes) is owned by agent-spawn §7.3 because it is a presentation-layer concern coupled to the orchestrator's pane lifecycle, not a backend choice. This skill returns Claude as the resolved backend and the caller decides cmux-vs-tmux via `execution.terminal_mux`.
-
-### Step 4: multica:<runtime> branch
-
-If the resolved backend matches `multica:<runtime>` (e.g. `multica:opencode`, `multica:gemini`):
-
-- Record the runtime tag in the episode record (for future cost/bias telemetry).
-- Do NOT open a cmux pane. Do NOT invoke the Messages-API or tmux substrate. Dispatch exclusively through the **Multica CLI substrate** (issue assignment via `multica issue update --assignee`).
-- The persona's story brief MUST NOT include a `/codex:rescue` instruction — the assigned agent is a native Multica agent that already knows its own runtime.
-- Assign the story issue to the agent persona's Multica agent UUID via `dispatchStoryToAgent`. Return `dispatch_decision=multica-issue-assign`.
-- The dispatched agent runs on the Multica runtime identified by `<runtime>` (e.g. Opencode, Gemini) and posts its result as a comment on the story issue, which the orchestrator picks up through the existing episode-record path.
-- Return `dispatch_result` with the same envelope shape as the codex and claude branches (`carrier`, `dispatches`, `dispatch_decision`).
+Terminal visibility is a presentation concern for the Claude fallback only; native runtime backends never depend on a terminal multiplexer.

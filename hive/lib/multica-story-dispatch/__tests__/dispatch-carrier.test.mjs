@@ -201,7 +201,7 @@ test('dispatchStoryToPersonas renders persona briefs with backend-split mapping'
 
     assert.doesNotMatch(descriptions.get('issue-researcher'), /\/codex:rescue/);
     assert.doesNotMatch(descriptions.get('issue-tester'), /\/codex:rescue/);
-    assert.match(descriptions.get('issue-reviewer'), /^## Use \/codex:rescue/m);
+    assert.doesNotMatch(descriptions.get('issue-reviewer'), /\/codex:rescue/);
   } finally {
     await close();
   }

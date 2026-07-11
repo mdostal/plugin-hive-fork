@@ -3,14 +3,14 @@ description: >
   Cross-model TDD workflow — Claude writes tests and reviews, Codex implements.
   Each model plays to its strengths: Claude for spec interpretation and quality
   judgment, Codex for raw implementation at lower cost. Different models reduce
-  confirmation bias. Requires agent_backends configured for codex + cmux installed.
+  confirmation bias. Requires agent_backends configured for the native Multica Codex runtime.
 version: "1.0.0"
 methodology: tdd
 
 # AGENT ROUTING:
-# Steps with `backend: codex` route through codex-invoke (cmux pane).
+# Steps with `backend: codex` route through native Multica issue assignment.
 # Steps with `backend: claude` (or unset) use standard Agent natural-language spawn.
-# The persistent Codex pane opens once and stays alive across implement + fix-loop.
+# The native Codex runtime receives implementation and fix-loop assignments through Multica.
 
 # PARALLELISM:
 # Within a story: steps are sequential (test → implement → review → fix loop).
@@ -102,12 +102,9 @@ steps:
     agent: orchestrator
     backend: claude
     task: >
-      Open a persistent Codex pane for the implementation and fix loop steps.
-      Use codex-invoke open-only mode with pane_mode: persistent, then record
-      the returned surface_id, approval_policy, and pane_opened_at in the
-      episode.
-      Do NOT send any implementation prompt — that happens in the next step.
-      Do NOT close this pane — it stays open until the shutdown step.
+      Prepare the native Codex runtime assignment for the implementation and fix-loop steps.
+      Resolve the Codex-backed Multica agent and record the assigned issue id, agent uuid, runtime tag, and assignment timestamp in the episode.
+      Do NOT run implementation in this setup step — that happens in the next step.
     depends_on:
       - test-spec
     inputs:
@@ -115,9 +112,9 @@ steps:
         source: context
         context_key: story_spec
     outputs:
-      - name: codex_surface_id
+      - name: codex_assignment_id
         type: string
-      - name: approval_policy
+      - name: runtime_tag
         type: string
     optional: false
     timeout_ms: 60000
@@ -127,22 +124,17 @@ steps:
     backend: codex
     pane_mode: persistent
     task: >
-      Send the implementation prompt to the persistent Codex pane opened in
-      the previous step. Do NOT open a new pane — reuse codex_surface_id.
+      Dispatch the implementation prompt to the native Codex runtime assignment prepared in the previous step.
 
-      Prompt structure (write to temp file, deliver via stdin):
-        1. Adapter prefix (from codex-invoke/adapter-prefix.md)
-        2. Developer persona (backend-developer or frontend-developer)
-        3. Research brief
-        4. "The following tests define the expected behavior. Implement the
+      Prompt structure:
+        1. Developer persona (backend-developer or frontend-developer)
+        2. Research brief
+        3. "The following tests define the expected behavior. Implement the
            minimum code to make ALL tests pass. Do not modify the tests."
-        5. Test file paths and test_command from the episode record
-        6. Story spec (for context — the tests are the primary contract)
+        4. Test file paths and test_command from the episode record
+        5. Story spec (for context — the tests are the primary contract)
 
-      Deliver: cmux send --surface <id> "cat <tempfile>"
-               cmux send-key --surface <id> enter
-
-      Poll cmux read-screen for Codex completion (shell prompt reappearance).
+      Dispatch through Multica issue assignment and poll the assigned issue for the Codex result comment.
 
       After Codex reports done, INDEPENDENTLY verify tests pass from the host:
         <test_command> 2>&1
@@ -152,10 +144,10 @@ steps:
     depends_on:
       - open-codex-pane
     inputs:
-      - name: codex_surface_id
+      - name: codex_assignment_id
         source: step_output
         step_id: open-codex-pane
-        output_name: codex_surface_id
+        output_name: codex_assignment_id
       - name: test_files
         source: step_output
         step_id: test-spec
@@ -232,8 +224,7 @@ steps:
     backend: codex
     pane_mode: persistent
     task: >
-      If review returned needs_optimization, send review findings to the SAME
-      Codex pane as a follow-up prompt. Do NOT open a new pane.
+      If review returned needs_optimization, dispatch review findings to the same native Codex runtime assignment as a follow-up prompt.
 
       Prompt: "The reviewer found these issues with your implementation. Fix
       each one. Re-run the tests after fixing. Do not modify the tests."
@@ -260,10 +251,10 @@ steps:
         source: step_output
         step_id: review
         output_name: review_verdict
-      - name: codex_surface_id
+      - name: codex_assignment_id
         source: step_output
         step_id: open-codex-pane
-        output_name: codex_surface_id
+        output_name: codex_assignment_id
       - name: test_command
         source: step_output
         step_id: test-spec
@@ -328,12 +319,12 @@ steps:
       1. Send pre-shutdown capture prompt to the Codex pane:
          "Summarize what you implemented, decisions you made, difficulties
          encountered, and patterns you'd reuse. Output as markdown."
-      2. Poll cmux read-screen for Codex response.
+      2. Poll the assigned issue for the Codex response.
       3. Capture Codex insights to episode:
          <HIVE_STATE_DIR>/episodes/{story_id}/codex/{agent}-codex-insights.md, where HIVE_STATE_DIR is the value of paths.state_dir in hive.config.yaml (default .pHive)
       4. Capture full scrollback:
-         cmux read-screen --surface <id> --scrollback → transcript file
-      5. Close the pane: cmux close-surface --surface <id>
+         native runtime result comment → transcript file
+      5. No pane cleanup is required
       6. Write final meta.json: total_fix_iterations, final_verdict,
          pane_lifetime_seconds, backend: codex.
 
@@ -346,10 +337,10 @@ steps:
       - integrate
       - fix-loop
     inputs:
-      - name: codex_surface_id
+      - name: codex_assignment_id
         source: step_output
         step_id: open-codex-pane
-        output_name: codex_surface_id
+        output_name: codex_assignment_id
       - name: story_spec
         source: context
         context_key: story_spec

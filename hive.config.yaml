@@ -296,8 +296,6 @@ execution:
   default_methodology: classic
   parallel_teams: true
   max_retry_attempts: 2
-  terminal_mux: cmux            # required for codex-backend panes
-  interactive_panes: true       # visible agent conversation in cmux panes
   idle_timeout_seconds: 300     # 5-min idle reaper for persistent Codex panes
   # Multica substrate adoption per project_multica_substrate_adoption (2026-05-20)
   # + multica-execute-routing follow-on. Hands each Hive story to a bootstrapped

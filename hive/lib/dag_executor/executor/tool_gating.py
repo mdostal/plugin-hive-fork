@@ -28,7 +28,7 @@ Second-factor checks (security:plan-audit findings #6 + #7):
     matches a denied persona.
 
 Platform check (Risk #11):
-  * macOS-only tools (`codex`, `cmux`) raise
+  * macOS-only tools (`codex`) raise
     `PlatformIncompatibilityError` on non-Darwin platforms. No
     silent fallback.
 
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from .telemetry import Telemetry
 
 
-MACOS_ONLY_TOOLS: frozenset[str] = frozenset({"codex", "cmux"})
+MACOS_ONLY_TOOLS: frozenset[str] = frozenset({"codex"})
 
 _PLATFORM: str = platform.system()
 

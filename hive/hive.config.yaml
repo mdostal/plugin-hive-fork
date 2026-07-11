@@ -222,22 +222,21 @@ external_models:
       - adversarial-review      # run after Claude review, before optimize/integrate
     # companion_path is auto-detected from the codex plugin if installed
 
-# Per-agent spawn backend (PoC — external-model-integration epic)
+# Per-agent spawn backend (external-model-integration epic)
 # Lets the orchestrator route specific agent personas through an external
 # model instead of Claude. Unset agents default to `claude` (auto-spawn path).
 # Supported backends: claude | codex | multica:<runtime>
-# - `codex` requires Codex CLI authentication plus the external model flag,
-#   codex login. macOS-only during PoC (cmux constraint). See
-#   skills/hive/skills/codex-invoke/SKILL.md for pre-flight details.
+# - `codex` is a convenience alias for `multica:codex`; dispatch goes through
+#   native Multica issue assignment, not a terminal pane.
 # - `multica:<runtime>` (e.g. multica:opencode, multica:gemini) dispatches the
 #   persona through the Multica CLI substrate. `opencode` is a convenience alias
-#   for `multica:opencode`. No cmux dependency — dispatch goes via issue assignment.
+#   for `multica:opencode`. dispatch goes via issue assignment.
 #   Use this for any Multica-native runtime agent (Opencode, Gemini, etc.).
 # Optional config example — to enable, uncomment the agent_backends map and
 # the per-persona entries beneath it:
 # agent_backends:
-#   reviewer: codex                # run reviewer in a cmux pane via OpenAI Codex
-#   backend-developer: codex       # run backend-developer in a cmux pane via OpenAI Codex
+#   reviewer: codex                # run reviewer through the native Multica Codex runtime
+#   backend-developer: codex       # run backend-developer through the native Multica Codex runtime
 #   researcher: multica:opencode   # run researcher through Multica Opencode runtime
 #   tester: opencode               # shorthand alias for multica:opencode
 
@@ -349,9 +348,7 @@ execution:
     timeout_seconds: 1800  # 30 min per sub-invocation; dispatch.mjs reads this key
   # Optional maintainer-only execution tuning — consumers do NOT need these
   # keys. Uncomment in your root `hive.config.yaml` to override:
-  #   terminal_mux: auto           # tmux | cmux | auto  (default: built-in tmux)
-  #   interactive_panes: true      # visible agent conversation (cmux only)
-  #   idle_timeout_seconds: 300    # 5-min idle reaper for persistent Codex panes
+  #   idle_timeout_seconds: 300    # 5-min idle reaper for long-running native Codex tasks
 
 # Cloud adapter gate
 # Keeps the legacy Sessions-API substrate dark by default until cloud

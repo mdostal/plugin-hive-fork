@@ -137,7 +137,7 @@ function normalizeMessages(body) {
 // stat, not a 5s-interval HTTP round trip. Scoped to Agent-based bg dispatch
 // only — the ONLY kind a Multica task is; Bash `run_in_background` has no
 // such hook and is out of scope for this loop entirely (that carve-out lives
-// in the DAG executor / cmux dispatch paths that can reach a Bash-bg node,
+// in the DAG executor  dispatch paths that can reach a Bash-bg node,
 // not here).
 // Critical #2 (PLU-577 revision): `task.agent_id` is a stable persona UUID,
 // not a per-run id — the SAME agent_id is reused across every story a given

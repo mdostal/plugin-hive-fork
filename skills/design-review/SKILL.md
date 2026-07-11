@@ -73,7 +73,7 @@ Call `skills/hive/skills/design-review-dispatch/SKILL.md` once, passing:
 Capture the returned `mode_decision`. When `mode_decision` is `multica`, hand off to
 `skills/hive/skills/design-review-mode-multica/SKILL.md` and stop. When `mode_decision`
 is `cc-workflows`, hand off to `skills/hive/skills/design-review-mode-cc-workflows/SKILL.md`
-and stop. For all other mode decisions (`sequential`, `team`, `team-cmux`, `sessions`,
+and stop. For all other mode decisions (`sequential`, `team`, `sessions`,
 `sandcastle`), continue with steps 1–8 below using the standard inline orchestration path.
 
 ### 1. Load workflow
