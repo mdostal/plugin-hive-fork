@@ -150,3 +150,58 @@ test('POST /api/approvals/submit-verdicts with missing fields returns 400', asyn
     assert.equal(body.error, 'missing_fields');
   });
 });
+
+// DOS-221 round 2: server.mjs previously sent a wildcard
+// Access-Control-Allow-Origin, so a browser tab on any website could
+// drive-by submit approval verdicts from a user's own machine with no auth.
+// This regression test proves a cross-origin POST is rejected outright.
+test('POST /api/approvals/submit from a foreign Origin is rejected, not answered with a wildcard', async () => {
+  await withServer(async ({ base, dbPath }) => {
+    register('destructive-op', { mode: 'human-gate', enabled: true, options: {} });
+    const seedEngine = createEngine(dbPath);
+    const { pending } = seedEngine.request('destructive-op', { target: 'prod-db' }, 'agent-1');
+    seedEngine._store.close();
+
+    const res = await fetch(`${base}/api/approvals/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+      body: JSON.stringify({ approvalId: pending.id, approve: true, approverIdentity: 'drive-by' }),
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+    const body = await res.json();
+    assert.equal(body.error, 'origin_not_allowed');
+
+    // The approval must still be pending — the cross-origin request never
+    // reached the engine.
+    const listRes = await fetch(`${base}/api/approvals/pending`);
+    const list = await listRes.json();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].id, pending.id);
+  });
+});
+
+test('OPTIONS preflight from a foreign Origin is rejected', async () => {
+  await withServer(async ({ base }) => {
+    const res = await fetch(`${base}/api/approvals/submit`, {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'POST' },
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+  });
+});
+
+test('a same-origin POST still gets an Access-Control-Allow-Origin header echoing that origin', async () => {
+  await withServer(async ({ base }) => {
+    const res = await fetch(`${base}/api/approvals/submit-verdicts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: base },
+      body: JSON.stringify({ approvalId: 'x' }),
+    });
+    // Same-origin request is let through to the route handler (400 for
+    // missing fields, not 403 for origin) and gets CORS headers back.
+    assert.equal(res.status, 400);
+    assert.equal(res.headers.get('access-control-allow-origin'), base);
+  });
+});
