@@ -130,9 +130,39 @@ ported to it.
 - All changes are additive files under `hive/lib/approval/`. No existing code is modified.
   Reverting is a directory delete; no migration needed.
 
+### Stage 3 — MCP + web fallback (DOS-221)
+
+Added on top of the unchanged engine/store contract; no changes to `hive/lib/approval/{engine,
+store,config-registry,types,modes}.mjs`.
+
+- **`mcp-server.mjs`** — newline-delimited JSON-RPC 2.0 over stdio (the framing used by
+  `hive/lib/multica-story-dispatch/mcp-tools.mjs`, not the older Content-Length framing in
+  `openai-image-mcp-server.js`). Five tools: `list_pending_approvals`, `get_pending_approval`,
+  `submit_verdict`, `list_decision_records`, `get_decision_record`. `submit_verdict` accepts either
+  `verdict` (human-gate) or `verdicts` (agent-quorum / multi-agent-vote) and calls `engine.submit()`
+  directly — the same completeness/atomicity guarantees from the Hardening section apply
+  cross-process between this server, `server.mjs`, and the Multica dashboard. Registered in
+  `.mcp.json` as `approval-actions`.
+- **`web/`** — a plain HTML + vanilla-JS dashboard (no build step, no framework) served by
+  `server.mjs` at `/`. Talks to the existing `/api/approvals/*` JSON API plus a new
+  `POST /api/approvals/submit-verdicts` endpoint (the array-verdict counterpart to the existing
+  single-verdict `/api/approvals/submit`, needed for agent-quorum / multi-agent-vote approvals from
+  a platform with no dashboard micro-frontend).
+- **`RULESET.md` + `inject-ruleset.mjs`** — the Dostal ruleset (gated actions must go through this
+  engine; MCP registry is discovery only, not policy; no pure-chat secret-entry path) is injected
+  into a target project's `AGENTS.md` / `CLAUDE.md` between idempotent markers. Applied to this repo
+  itself as the first consumer.
+- **`~/.multica/plugins/approval/plugin.json`** — registers the plugin per the v1 manifest schema
+  (`type: core`, `engine.kind: mcp`, `ui.mount: link`) documented in
+  `~/Code/dostal-swarm/docs/plugin-framework.md`.
+
+Explicit non-goal carried over from the design doc: no tool or endpoint here accepts, stores, or
+requests a raw secret/credential — this surface only ever reads/writes approval decisions.
+
 ## References
 
 - Design doc: `~/Code/dostal-swarm/docs/approval-plugin.md`
 - Decision type source: `~/Code/multica/packages/core/permissions/types.ts`
 - Parent epic: DOS-217 (Approval Actions plugin)
 - This engine: DOS-218 (Stage 1 — engine + contract)
+- MCP + web fallback: DOS-221 (Stage 3)

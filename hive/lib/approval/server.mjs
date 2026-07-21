@@ -3,7 +3,9 @@
  *
  * Exposes the ApprovalEngine over a local HTTP interface so the Multica
  * dashboard micro-frontend can list pending approvals, submit decisions, and
- * read audit records without depending on the Multica server itself.
+ * read audit records without depending on the Multica server itself. Also
+ * serves the plain web dashboard fallback (DOS-221, ./web/) at "/" for
+ * platforms without the Multica micro-frontend — same API, no build step.
  *
  * Runs on 127.0.0.1:7841 by default (override via APPROVAL_PORT env var).
  * CORS is open for localhost origins — this server is only reachable locally.
@@ -14,10 +16,21 @@
  */
 
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { createEngine } from './engine.mjs';
 
 const PORT = Number(process.env.APPROVAL_PORT ?? 7841);
 const HOST = '127.0.0.1';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_DIR = path.join(__dirname, 'web');
+const STATIC_FILES = {
+  '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
+  '/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
+  '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
+};
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -89,6 +102,21 @@ export function startApprovalServer(dbPath) {
         return send(res, 200, result.auditRecord);
       }
 
+      // POST /api/approvals/submit-verdicts — agent-quorum / multi-agent-vote:
+      // { approvalId, verdicts: VerdictEntry[] } (the complete set, one per
+      // configured quorum member / panel lens).
+      if (req.method === 'POST' && pathname === '/api/approvals/submit-verdicts') {
+        const body = await readBody(req);
+        const { approvalId, verdicts } = body;
+        if (!approvalId || !Array.isArray(verdicts)) {
+          return send(res, 400, { error: 'missing_fields', required: ['approvalId', 'verdicts (array)'] });
+        }
+        const timestamp = new Date().toISOString();
+        const result = engine.submit(approvalId, verdicts, timestamp);
+        if ('error' in result) return send(res, 400, result);
+        return send(res, 200, result.auditRecord);
+      }
+
       // GET /api/approvals/audit-records
       if (req.method === 'GET' && pathname === '/api/approvals/audit-records') {
         const actionType = url.searchParams.get('actionType') ?? undefined;
@@ -106,6 +134,18 @@ export function startApprovalServer(dbPath) {
       // GET /health
       if (req.method === 'GET' && pathname === '/health') {
         return send(res, 200, { ok: true });
+      }
+
+      // GET / , /index.html , /app.js — plain web dashboard fallback (DOS-221)
+      if (req.method === 'GET' && STATIC_FILES[pathname]) {
+        const { file, type } = STATIC_FILES[pathname];
+        try {
+          const contents = await readFile(path.join(WEB_DIR, file));
+          res.writeHead(200, { 'Content-Type': type, ...CORS_HEADERS });
+          return res.end(contents);
+        } catch {
+          return send(res, 404, { error: 'not_found' });
+        }
       }
 
       send(res, 404, { error: 'not_found' });
