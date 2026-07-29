@@ -10,11 +10,13 @@
  *  (f) resolveCCSkill() returns correct paths for each substrate
  *  (g) resolveCCSkill() falls back to 'default' for unknown substrates
  *
- * Convention: vitest (matches cc-workflows-model-tier.test.mjs).
+ * Convention: node:test + node:assert/strict (matches the 37-file repo majority;
+ * vitest is not a declared dependency).
  */
 
-import { describe, expect, it, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { describe, it, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -41,19 +43,6 @@ function makeTmpManifestsDir(manifests = []) {
   return dir;
 }
 
-const MINIMAL_MANIFEST = (id = 'foo') => `
-id: ${id}
-name: Foo Workflow
-version: "1.0"
-steps:
-  - id: do-thing
-    role: researcher
-adapters:
-  default:
-    type: cc-skill
-    skill: skills/${id}/SKILL.md
-`;
-
 // ---------------------------------------------------------------------------
 // (a) loadManifests() from the real manifests directory
 // ---------------------------------------------------------------------------
@@ -63,13 +52,13 @@ describe('loadManifests() — real manifests dir', () => {
 
   it('loads without throwing', () => {
     const registry = loadManifests();
-    expect(registry).toBeDefined();
-    expect(registry.size).toBeGreaterThanOrEqual(1);
+    assert.notStrictEqual(registry, undefined);
+    assert.ok(registry.size >= 1);
   });
 
   it('includes the plan workflow', () => {
     const registry = loadManifests();
-    expect(registry.has('plan')).toBe(true);
+    assert.strictEqual(registry.has('plan'), true);
   });
 });
 
@@ -82,14 +71,14 @@ describe('listWorkflows()', () => {
 
   it('returns an array of workflow summaries', () => {
     const list = listWorkflows();
-    expect(Array.isArray(list)).toBe(true);
-    expect(list.length).toBeGreaterThanOrEqual(1);
+    assert.ok(Array.isArray(list));
+    assert.ok(list.length >= 1);
 
     const plan = list.find((w) => w.id === 'plan');
-    expect(plan).toBeDefined();
-    expect(typeof plan.name).toBe('string');
-    expect(typeof plan.source).toBe('string');
-    expect(plan.source).toMatch(/plan\.process\.yaml$/);
+    assert.notStrictEqual(plan, undefined);
+    assert.strictEqual(typeof plan.name, 'string');
+    assert.strictEqual(typeof plan.source, 'string');
+    assert.match(plan.source, /plan\.process\.yaml$/);
   });
 });
 
@@ -102,34 +91,35 @@ describe('getManifest()', () => {
 
   it('returns the plan manifest with expected shape', () => {
     const { manifest, source } = getManifest('plan');
-    expect(manifest.id).toBe('plan');
-    expect(manifest.name).toMatch(/plan/i);
-    expect(typeof manifest.version).toBe('string');
-    expect(Array.isArray(manifest.steps)).toBe(true);
-    expect(manifest.steps.length).toBeGreaterThan(0);
-    expect(typeof manifest.adapters).toBe('object');
-    expect(source).toMatch(/plan\.process\.yaml$/);
+    assert.strictEqual(manifest.id, 'plan');
+    assert.match(manifest.name, /plan/i);
+    assert.strictEqual(typeof manifest.version, 'string');
+    assert.ok(Array.isArray(manifest.steps));
+    assert.ok(manifest.steps.length > 0);
+    assert.strictEqual(typeof manifest.adapters, 'object');
+    assert.match(source, /plan\.process\.yaml$/);
   });
 
   it('plan manifest has default, multica, cc-workflows, and hive-dag adapters', () => {
     const { manifest } = getManifest('plan');
-    expect(manifest.adapters).toHaveProperty('default');
-    expect(manifest.adapters).toHaveProperty('multica');
-    expect(manifest.adapters).toHaveProperty('cc-workflows');
-    expect(manifest.adapters).toHaveProperty('hive-dag');
+    assert.ok('default' in manifest.adapters);
+    assert.ok('multica' in manifest.adapters);
+    assert.ok('cc-workflows' in manifest.adapters);
+    assert.ok('hive-dag' in manifest.adapters);
   });
 
   it('plan steps include research, design, design-gate, author', () => {
     const { manifest } = getManifest('plan');
     const ids = manifest.steps.map((s) => s.id);
-    expect(ids).toContain('research');
-    expect(ids).toContain('design');
-    expect(ids).toContain('design-gate');
-    expect(ids).toContain('author');
+    assert.ok(ids.includes('research'));
+    assert.ok(ids.includes('design'));
+    assert.ok(ids.includes('design-gate'));
+    assert.ok(ids.includes('author'));
   });
 
   it('throws for unknown workflow id', () => {
-    expect(() => getManifest('nonexistent-workflow-xyz')).toThrow(
+    assert.throws(
+      () => getManifest('nonexistent-workflow-xyz'),
       /no manifest for workflow/
     );
   });
@@ -144,14 +134,14 @@ describe('validation — invalid manifests', () => {
     const dir = makeTmpManifestsDir([
       { filename: 'Bad_Name.process.yaml', content: `id: Bad_Name\nname: x\nversion: "1.0"\nsteps:\n  - id: s\n    role: r\nadapters:\n  default:\n    type: cc-skill\n    skill: x.md\n` },
     ]);
-    expect(() => loadManifests({ _manifestsDir: dir, _reset: true })).toThrow(/kebab-case/);
+    assert.throws(() => loadManifests({ _manifestsDir: dir, _reset: true }), /kebab-case/);
   });
 
   it('rejects a manifest with no adapters.default', () => {
     const dir = makeTmpManifestsDir([
       { filename: 'foo.process.yaml', content: `id: foo\nname: Foo\nversion: "1.0"\nsteps:\n  - id: s\n    role: r\nadapters:\n  multica:\n    type: cc-skill\n    skill: x.md\n` },
     ]);
-    expect(() => loadManifests({ _manifestsDir: dir, _reset: true })).toThrow(/adapters.default is required/);
+    assert.throws(() => loadManifests({ _manifestsDir: dir, _reset: true }), /adapters.default is required/);
   });
 
   it('rejects a manifest with duplicate step ids', () => {
@@ -161,7 +151,7 @@ describe('validation — invalid manifests', () => {
         content: `id: dup\nname: Dup\nversion: "1.0"\nsteps:\n  - id: s\n    role: r\n  - id: s\n    role: r\nadapters:\n  default:\n    type: cc-skill\n    skill: x.md\n`,
       },
     ]);
-    expect(() => loadManifests({ _manifestsDir: dir, _reset: true })).toThrow(/duplicate step ids/);
+    assert.throws(() => loadManifests({ _manifestsDir: dir, _reset: true }), /duplicate step ids/);
   });
 
   it('rejects a manifest where depends_on references an unknown step', () => {
@@ -171,7 +161,7 @@ describe('validation — invalid manifests', () => {
         content: `id: bad-dep\nname: Bad\nversion: "1.0"\nsteps:\n  - id: a\n    role: r\n    depends_on: [ghost]\nadapters:\n  default:\n    type: cc-skill\n    skill: x.md\n`,
       },
     ]);
-    expect(() => loadManifests({ _manifestsDir: dir, _reset: true })).toThrow(/depends_on unknown step/);
+    assert.throws(() => loadManifests({ _manifestsDir: dir, _reset: true }), /depends_on unknown step/);
   });
 
   it('rejects a manifest whose filename stem does not match its id', () => {
@@ -181,7 +171,8 @@ describe('validation — invalid manifests', () => {
         content: `id: foo\nname: Foo\nversion: "1.0"\nsteps:\n  - id: s\n    role: r\nadapters:\n  default:\n    type: cc-skill\n    skill: x.md\n`,
       },
     ]);
-    expect(() => loadManifests({ _manifestsDir: dir, _reset: true })).toThrow(
+    assert.throws(
+      () => loadManifests({ _manifestsDir: dir, _reset: true }),
       /filename stem.*does not match manifest id/
     );
   });
@@ -199,25 +190,25 @@ describe('non-CC executor path — step enumeration', () => {
     const gateSteps = manifest.steps.filter(
       (s) => s.node_type === 'user_gate' || s.node_type === 'gate'
     );
-    expect(gateSteps.length).toBeGreaterThan(0);
+    assert.ok(gateSteps.length > 0);
 
     const agentSteps = manifest.steps.filter((s) => !s.node_type || s.node_type === 'agent');
-    expect(agentSteps.length).toBeGreaterThan(0);
+    assert.ok(agentSteps.length > 0);
 
     // Every step can be inspected for its id, role, and depends_on
     for (const step of manifest.steps) {
-      expect(typeof step.id).toBe('string');
-      expect(typeof step.role).toBe('string');
-      expect(Array.isArray(step.depends_on ?? [])).toBe(true);
+      assert.strictEqual(typeof step.id, 'string');
+      assert.strictEqual(typeof step.role, 'string');
+      assert.ok(Array.isArray(step.depends_on ?? []));
     }
   });
 
   it('non-CC executor can find a dag-workflow adapter without any cc-skill knowledge', () => {
     const { manifest } = getManifest('plan');
     const dagAdapter = manifest.adapters['hive-dag'];
-    expect(dagAdapter).toBeDefined();
-    expect(dagAdapter.type).toBe('dag-workflow');
-    expect(dagAdapter.workflow).toMatch(/\.yaml$/);
+    assert.notStrictEqual(dagAdapter, undefined);
+    assert.strictEqual(dagAdapter.type, 'dag-workflow');
+    assert.match(dagAdapter.workflow, /\.yaml$/);
   });
 });
 
@@ -232,23 +223,25 @@ describe('resolveCCSkill()', () => {
   });
 
   it('resolves default substrate to skills/plan/SKILL.md', () => {
-    expect(resolveCCSkill(planManifest, 'default')).toBe('skills/plan/SKILL.md');
+    assert.strictEqual(resolveCCSkill(planManifest, 'default'), 'skills/plan/SKILL.md');
   });
 
   it('resolves multica substrate', () => {
-    expect(resolveCCSkill(planManifest, 'multica')).toBe(
+    assert.strictEqual(
+      resolveCCSkill(planManifest, 'multica'),
       'skills/hive/skills/plan-mode-multica/SKILL.md'
     );
   });
 
   it('resolves cc-workflows substrate', () => {
-    expect(resolveCCSkill(planManifest, 'cc-workflows')).toBe(
+    assert.strictEqual(
+      resolveCCSkill(planManifest, 'cc-workflows'),
       'skills/hive/skills/plan-mode-cc-workflows/SKILL.md'
     );
   });
 
   it('falls back to default for unknown substrate', () => {
-    expect(resolveCCSkill(planManifest, 'unknown-substrate')).toBe('skills/plan/SKILL.md');
+    assert.strictEqual(resolveCCSkill(planManifest, 'unknown-substrate'), 'skills/plan/SKILL.md');
   });
 
   it('throws when called on a dag-workflow adapter without a cc-skill fallback path', () => {
@@ -258,7 +251,7 @@ describe('resolveCCSkill()', () => {
         default: { type: 'dag-workflow', workflow: 'hive/workflows/mock.yaml' },
       },
     };
-    expect(() => resolveCCSkill(noDefault, 'default')).toThrow(/not "cc-skill"/);
+    assert.throws(() => resolveCCSkill(noDefault, 'default'), /not "cc-skill"/);
   });
 });
 
@@ -271,10 +264,10 @@ describe('listCCSkillAdapters()', () => {
     const { manifest } = getManifest('plan');
     const cc = listCCSkillAdapters(manifest);
     const substrates = cc.map((a) => a.substrate).sort();
-    expect(substrates).toContain('default');
-    expect(substrates).toContain('multica');
-    expect(substrates).toContain('cc-workflows');
+    assert.ok(substrates.includes('default'));
+    assert.ok(substrates.includes('multica'));
+    assert.ok(substrates.includes('cc-workflows'));
     // hive-dag is dag-workflow type, should NOT appear
-    expect(substrates).not.toContain('hive-dag');
+    assert.ok(!substrates.includes('hive-dag'));
   });
 });
