@@ -225,15 +225,21 @@ external_models:
 # Per-agent spawn backend (PoC — external-model-integration epic)
 # Lets the orchestrator route specific agent personas through an external
 # model instead of Claude. Unset agents default to `claude` (auto-spawn path).
-# Supported backends: claude | codex
+# Supported backends: claude | codex | multica:<runtime>
 # - `codex` requires Codex CLI authentication plus the external model flag,
 #   codex login. macOS-only during PoC (cmux constraint). See
 #   skills/hive/skills/codex-invoke/SKILL.md for pre-flight details.
+# - `multica:<runtime>` (e.g. multica:opencode, multica:gemini) dispatches the
+#   persona through the Multica CLI substrate. `opencode` is a convenience alias
+#   for `multica:opencode`. No cmux dependency — dispatch goes via issue assignment.
+#   Use this for any Multica-native runtime agent (Opencode, Gemini, etc.).
 # Optional config example — to enable, uncomment the agent_backends map and
 # the per-persona entries beneath it:
 # agent_backends:
 #   reviewer: codex                # run reviewer in a cmux pane via OpenAI Codex
 #   backend-developer: codex       # run backend-developer in a cmux pane via OpenAI Codex
+#   researcher: multica:opencode   # run researcher through Multica Opencode runtime
+#   tester: opencode               # shorthand alias for multica:opencode
 
 # Developer preferences (populated by Phase 2b-ii: Developer Discovery)
 # These configure how Hive adapts to the developer's working style.

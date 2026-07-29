@@ -32,6 +32,30 @@ Placeholder columns for substrates not yet shipped. New substrates land here as 
 
 Note: `execute-mode-sandcastle/SKILL.md` exists as an Epic D candidate but the full sandcastle substrate row (all 6 orchestrators) has not shipped. It is listed here as `not-shipped` to keep the matrix forward-extensible.
 
+## Manifest Source (process-manifest registry)
+
+Each shipped orchestrator has a corresponding **process manifest** in `hive/manifests/`. The
+manifest is the executor-neutral representation of the workflow — its steps, gates, and
+adapters — expressed as data that any executor (CC plugin, Codex, direct API, hive-dag)
+can consume. The matrix above lists the CC adapter paths as before; the table below adds
+the manifest-source column.
+
+| Orchestrator | Manifest |
+|---|---|
+| plan | hive/manifests/plan.process.yaml |
+
+The `adapters` section of each manifest maps substrate keys to the concrete CC skill or
+DAG workflow file listed in the matrix. For example, `plan.process.yaml`
+`adapters.multica.skill` resolves to the same path as the multica cell above. The CC
+plugin is thus the **reference adapter** that reads a manifest and materialises today's
+skill/hook dispatch — it is not the control plane itself.
+
+Follow-on: the remaining five orchestrators (execute / test / design / design-review /
+review) ship their manifests in subsequent stories. Until then, only `plan` appears here.
+
+Verification: `node hive/scripts/verify-dispatch-parity.mjs` also checks that every
+manifest path cited in this table exists on disk and is git-tracked.
+
 ## Verification
 
 Run `node hive/scripts/verify-dispatch-parity.mjs` from repo root. Exit 0 = all cited paths resolve on disk AND `git ls-files` confirms tracking. Exit 1 = at least one path missing/untracked; checker prints the failing rows. CI runs this on every PR; PRs that move/remove a cited path fail until the matrix is updated.
