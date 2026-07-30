@@ -282,7 +282,7 @@ const MEMORY_BRIEF_SCRIPT_PATH = fileURLToPath(new URL('../memory_brief.py', imp
 // in the Python module.
 export async function fetchPriorExperienceSection(persona, epic, storyId, options = {}) {
   if (!persona) return null;
-  const { tokenBudget, pythonBin = 'python3' } = options;
+  const { tokenBudget, pythonBin = 'python3', query = null } = options;
 
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
@@ -291,6 +291,7 @@ export async function fetchPriorExperienceSection(persona, epic, storyId, option
   const args = [MEMORY_BRIEF_SCRIPT_PATH, '--persona', persona];
   if (epic) args.push('--epic', epic);
   if (storyId) args.push('--story', storyId);
+  if (query) args.push('--query', query);
   if (tokenBudget) args.push('--token-budget', String(tokenBudget));
 
   try {
@@ -309,11 +310,12 @@ export async function fetchPriorExperienceSection(persona, epic, storyId, option
 // synchronous serializeStoryBrief with the one async, best-effort step
 // (shelling to Python for prior-experience memories).
 export async function buildStoryBrief(story, options = {}) {
+  const storyQuery = [story?.title, story?.description].filter(Boolean).join(' \u2014 ');
   const priorExperienceSection = await fetchPriorExperienceSection(
     options.dispatchingPersona,
     story?.epic,
     story?.id,
-    { tokenBudget: options.memoryTokenBudget, pythonBin: options.pythonBin },
+    { tokenBudget: options.memoryTokenBudget, pythonBin: options.pythonBin, query: storyQuery },
   );
   return serializeStoryBrief(story, { ...options, priorExperienceSection });
 }

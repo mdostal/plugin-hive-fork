@@ -21,6 +21,12 @@ from typing import Any
 DEFAULT_TOKEN_BUDGET = 1500
 DEFAULT_CLASSIC_TOP_N = 5
 DEFAULT_KG_DB_PATH = Path.home() / ".claude" / "hive" / "kg.sqlite"
+# Semantic recall (PAN-6642): pull relevant knowledge from the swarm-memory
+# Qdrant corpus keyed on the story text. Floor 0.60 mirrors the Hermes
+# provider so unrelated stories inject nothing rather than low-similarity noise.
+DEFAULT_RECALL_HITS = 3
+DEFAULT_RECALL_MIN_SCORE = 0.60
+RECALL_SECTION = "### Recalled Knowledge (semantic corpus)"
 DECISION_PREDICATES = ("phase_failed", "phase_blocked", "decided", "insight")
 SECTION_HEADER = "## Prior Experience"
 
@@ -184,12 +190,71 @@ def _format_decision_triple(triple: DecisionTriple) -> str:
     return f"- {triple.subject} {triple.predicate} {triple.object} (since {triple.valid_from}{epic_note}) (kg)"
 
 
+def gather_semantic_recall(
+    query: str,
+    *,
+    hits: int = DEFAULT_RECALL_HITS,
+    min_score: float = DEFAULT_RECALL_MIN_SCORE,
+    scope: str | None = None,
+    bin_path: str | None = None,
+) -> list[tuple[str, str]]:
+    """Best-effort semantic recall from the swarm-memory Qdrant corpus.
+
+    Shells to the ``swarm-memory`` CLI (subprocess = stdlib, so no vector or
+    embedder deps live here — same bridge policy the Node layer uses to reach
+    this module). Returns a list of (provenance_label, text) above the relevance
+    floor, or [] on any failure. Recall is advisory and must never block a
+    dispatch, so every error path returns [].
+    """
+    import json
+    import shutil
+    import subprocess
+
+    q = (query or "").strip()
+    if not q:
+        return []
+    cli = bin_path or os.environ.get("SWARM_MEMORY_BIN") or shutil.which("swarm-memory")
+    if not cli:
+        return []
+    scope = scope or os.environ.get("HIVE_MEMORY_SCOPE") or os.environ.get("SWARM_MEMORY_SCOPE") or ""
+    argv = [cli, "recall", q[:300], "--json", "--hits", str(hits), "--min-score", str(min_score)]
+    if scope:
+        argv += ["--scope", scope]
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=12)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0 or not out.stdout.strip():
+        return []
+    try:
+        data = json.loads(out.stdout)
+    except (ValueError, json.JSONDecodeError):
+        return []
+    if not data.get("total_hits"):
+        return []
+    results: list[tuple[str, str]] = []
+    for scope_result in data.get("scopes", []):
+        for hit in scope_result.get("hits", []):
+            try:
+                if float(hit.get("score", 0.0)) < min_score:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            text = (hit.get("text") or "").strip()
+            if not text:
+                continue
+            loc = hit.get("location") or hit.get("full_path") or ""
+            results.append((loc, text))
+    return results
+
+
 def build_prior_experience(
     persona: str,
     epic: str | None,
     story: str | None,
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     *,
+    query: str | None = None,
     team_memories_root: Path | None = None,
     classic_memories_root: Path | None = None,
     kg_db_path: Path | None = None,
@@ -241,6 +306,24 @@ def build_prior_experience(
                 lines.extend(kg_lines)
                 budget_left = remaining
 
+    recall_hits = gather_semantic_recall(query) if query else []
+    if recall_hits and budget_left > 0:
+        heading_cost = estimate_tokens(RECALL_SECTION)
+        if heading_cost <= budget_left:
+            recall_lines = [RECALL_SECTION]
+            remaining = budget_left - heading_cost
+            for loc, text in recall_hits:
+                snippet = text[:400]
+                line = f"- **[{loc}]** {snippet}" if loc else f"- {snippet}"
+                cost = estimate_tokens(line)
+                if cost > remaining:
+                    break
+                recall_lines.append(line)
+                remaining -= cost
+            if len(recall_lines) > 1:
+                lines.extend(recall_lines)
+                budget_left = remaining
+
     if not lines:
         return ""
 
@@ -252,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--persona", required=True)
     parser.add_argument("--epic", default=None)
     parser.add_argument("--story", default=None)
+    parser.add_argument("--query", default=None,
+                        help="Story text (title/description) for semantic recall.")
     parser.add_argument("--token-budget", type=int, default=DEFAULT_TOKEN_BUDGET)
     parser.add_argument("--team-memories-root", default=None)
     parser.add_argument("--classic-memories-root", default=None)
@@ -263,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         args.epic,
         args.story,
         args.token_budget,
+        query=args.query,
         team_memories_root=Path(args.team_memories_root) if args.team_memories_root else None,
         classic_memories_root=Path(args.classic_memories_root) if args.classic_memories_root else None,
         kg_db_path=Path(args.kg_db_path) if args.kg_db_path else None,
