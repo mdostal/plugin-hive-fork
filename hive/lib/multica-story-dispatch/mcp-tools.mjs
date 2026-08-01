@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { negotiateMcpProtocolVersion } from '../mcp-protocol-version.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,13 @@ const TOOL_DEFINITIONS = [
         story_id: {
           type: 'string',
           description: 'Story ID used in the integration contract commit-message template (optional).',
+        },
+        epic: {
+          type: 'string',
+          description:
+            'Epic handle used to scope the Prior Experience memory injection (optional). When agent_name ' +
+            'is set, the issue brief is stamped with the persona and augmented with any relevant prior ' +
+            'team-memory / knowledge-graph context for this epic before dispatch.',
         },
         rerun: {
           type: 'boolean',
@@ -293,6 +301,7 @@ async function invokeTool(name, args) {
       if (a.squad_name) flags.push('--squad', String(a.squad_name));
       if (a.integration_branch) flags.push('--integration-branch', String(a.integration_branch));
       if (a.story_id) flags.push('--story-id', String(a.story_id));
+      if (a.epic) flags.push('--epic', String(a.epic));
       if (a.rerun) flags.push('--rerun');
       return callCli('dispatch', flags);
     }
@@ -335,6 +344,8 @@ async function invokeTool(name, args) {
       return callCli('comment', ['--issue', String(a.issue_id), '--body', String(a.body)]);
 
     case 'multica_episode':
+      // Forwards to cli.mjs's `episode` subcommand, which enables insight
+      // distill by default (no flag needed) — see cmdEpisode.
       requireArgs(name, a, ['issue_id', 'epic', 'story']);
       return callCli('episode', [
         '--issue', String(a.issue_id),
@@ -384,7 +395,7 @@ async function handleRpcMessage(message) {
         jsonrpc: '2.0',
         id: message.id,
         result: {
-          protocolVersion: message.params?.protocolVersion ?? '2024-11-05',
+          protocolVersion: negotiateMcpProtocolVersion(message.params?.protocolVersion),
           capabilities: { tools: {} },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         },
