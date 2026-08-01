@@ -190,6 +190,78 @@ def _format_decision_triple(triple: DecisionTriple) -> str:
     return f"- {triple.subject} {triple.predicate} {triple.object} (since {triple.valid_from}{epic_note}) (kg)"
 
 
+def _recall_via_mnemosyne(
+    query: str, *, hits: int, min_score: float, scope: str,
+) -> dict[str, Any] | None:
+    """Recall via the Mnemosyne memory god's HTTP /recall.
+
+    Returns the engine's native ``--json`` dict (IDENTICAL shape to
+    ``swarm-memory recall --json``, so the caller flattens it the same way) or
+    ``None`` on ANY failure — routing disabled, unreachable god, timeout,
+    non-200, bad JSON. A ``None`` return is the signal to fall back to the
+    direct CLI so memory never hard-breaks when the god is down. Stdlib-only
+    (urllib) — same no-heavy-deps bridge policy as the CLI path.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    if os.environ.get("MNEMOSYNE_RECALL", "1") == "0":
+        return None
+    url = (os.environ.get("MNEMOSYNE_URL") or "http://127.0.0.1:8477").rstrip("/")
+    try:
+        timeout = float(os.environ.get("MNEMOSYNE_TIMEOUT", "10"))
+    except ValueError:
+        timeout = 10.0
+    body: dict[str, Any] = {"query": query[:300], "hits": hits, "min_score": min_score}
+    if scope:
+        body["scope"] = scope
+    req = urllib.request.Request(
+        f"{url}/recall",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _recall_via_cli(
+    query: str, *, hits: int, min_score: float, scope: str, bin_path: str | None,
+) -> dict[str, Any] | None:
+    """Direct swarm-memory CLI recall — the fallback when the god is unreachable.
+
+    Shells to the ``swarm-memory`` CLI (subprocess = stdlib, so no vector or
+    embedder deps live here). Returns the parsed ``--json`` dict or ``None`` on
+    any failure.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    cli = bin_path or os.environ.get("SWARM_MEMORY_BIN") or shutil.which("swarm-memory")
+    if not cli:
+        return None
+    argv = [cli, "recall", query[:300], "--json", "--hits", str(hits), "--min-score", str(min_score)]
+    if scope:
+        argv += ["--scope", scope]
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=12)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    try:
+        return json.loads(out.stdout)
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
 def gather_semantic_recall(
     query: str,
     *,
@@ -200,38 +272,25 @@ def gather_semantic_recall(
 ) -> list[tuple[str, str]]:
     """Best-effort semantic recall from the swarm-memory Qdrant corpus.
 
-    Shells to the ``swarm-memory`` CLI (subprocess = stdlib, so no vector or
-    embedder deps live here — same bridge policy the Node layer uses to reach
-    this module). Returns a list of (provenance_label, text) above the relevance
-    floor, or [] on any failure. Recall is advisory and must never block a
-    dispatch, so every error path returns [].
+    Routes THROUGH the Mnemosyne memory god's HTTP API when reachable (the one
+    owned memory path); falls back to shelling the ``swarm-memory`` CLI directly
+    on any failure, so recall — which is advisory and must never block a
+    dispatch — degrades to [] rather than raising. Both paths return the engine's
+    identical ``--json`` shape, flattened here to a list of (provenance, text)
+    above the relevance floor.
     """
-    import json
-    import shutil
-    import subprocess
-
     q = (query or "").strip()
     if not q:
         return []
-    cli = bin_path or os.environ.get("SWARM_MEMORY_BIN") or shutil.which("swarm-memory")
-    if not cli:
-        return []
     scope = scope or os.environ.get("HIVE_MEMORY_SCOPE") or os.environ.get("SWARM_MEMORY_SCOPE") or ""
-    argv = [cli, "recall", q[:300], "--json", "--hits", str(hits), "--min-score", str(min_score)]
-    if scope:
-        argv += ["--scope", scope]
-    try:
-        out = subprocess.run(argv, capture_output=True, text=True, timeout=12)
-    except (OSError, subprocess.SubprocessError):
+
+    # Primary: the memory god. None on any failure -> fall back to the CLI.
+    data = _recall_via_mnemosyne(q, hits=hits, min_score=min_score, scope=scope)
+    if data is None:
+        data = _recall_via_cli(q, hits=hits, min_score=min_score, scope=scope, bin_path=bin_path)
+    if not data or not data.get("total_hits"):
         return []
-    if out.returncode != 0 or not out.stdout.strip():
-        return []
-    try:
-        data = json.loads(out.stdout)
-    except (ValueError, json.JSONDecodeError):
-        return []
-    if not data.get("total_hits"):
-        return []
+
     results: list[tuple[str, str]] = []
     for scope_result in data.get("scopes", []):
         for hit in scope_result.get("hits", []):
