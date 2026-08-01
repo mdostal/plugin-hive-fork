@@ -41,9 +41,32 @@
  */
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
 const CODEX_CMD = process.env.CODEX_CMD || 'codex';
+
+/**
+ * Resolve the model id for a codex run. codex exec --json does not report the model
+ * in its event stream, so we take it from the explicit opts.model when provided, else
+ * the codex CLI's configured default (~/.codex/config.toml `model = "..."`). Returns
+ * null when neither is available (best-effort, never throws).
+ *
+ * @param {{ model?: string|null }} [opts]
+ * @returns {string|null}
+ */
+export function resolveCodexModel(opts = {}) {
+  if (opts && opts.model) return String(opts.model);
+  try {
+    const cfg = readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
+    const m = cfg.match(/^\s*model\s*=\s*"([^"]+)"/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Spawn codex exec and return a promise that resolves with the collected
@@ -206,6 +229,7 @@ export function eventsToMessages(events) {
 export async function runCodexExec(prompt, opts = {}) {
   const { agentName = 'codex' } = opts;
   const startedAt = new Date().toISOString();
+  const model = resolveCodexModel(opts);
 
   let events;
   let exitCode;
@@ -226,6 +250,7 @@ export async function runCodexExec(prompt, opts = {}) {
       completed_at: completedAt,
       thread_id: null,
       usage: null,
+      model,
     };
   }
 
@@ -253,5 +278,6 @@ export async function runCodexExec(prompt, opts = {}) {
     completed_at: completedAt,
     thread_id: threadId,
     usage,
+    model,
   };
 }
