@@ -94,13 +94,13 @@ test('combo codex+claude: provider=codex + agent_backends=claude → omit rescue
   assert.doesNotMatch(brief, /\/codex:rescue/);
 });
 
-test('combo claude+codex: provider=claude + agent_backends=codex → embed rescue section', () => {
+test('combo claude+codex: provider=claude + agent_backends=codex → omit rescue section', () => {
   const brief = serializeStoryBrief(fullStory(), {
     dispatchingPersona: 'reviewer',
     agents: makeAgents('reviewer', 'claude'),
     agentBackends: { reviewer: 'codex' },
   });
-  assert.match(brief, /^## Use \/codex:rescue/m);
+  assert.doesNotMatch(brief, /\/codex:rescue/);
 });
 
 test('combo claude+claude: provider=claude + agent_backends=claude → omit rescue section', () => {

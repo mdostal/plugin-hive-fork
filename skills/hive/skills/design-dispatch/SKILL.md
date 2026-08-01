@@ -14,15 +14,15 @@ Atomic skill, NOT inline `/design` prose. It resolves the pre-execution dispatch
 
 Call this skill once at the single `/design` dispatch point where the caller has both the story execution context and the current workflow handoff context.
 
-**Inputs:** `env` with `HIVE_SESSIONS_ENABLED`, `HIVE_PARALLEL_TEAMS`, `HIVE_TERMINAL_MUX`, and `HIVE_DESIGN_MODE`; parsed root `hive.config.yaml` containing `sessions.enabled`, `parallel_teams` or `execution.parallel_teams`, and `execution.terminal_mux`; parsed consumer `.pHive/hive.config.yaml` or `None`; parsed graduation registry workflow list or `None`; `workflow_name`; `epic_id` when known; `arguments` containing the `--sequential` flag state plus dependency-depth summary; and `unblocked_stories[]` — the depth-0 ready stories at this dispatch tick, each carrying at minimum `id`, `parallel_allowed`, `parallel_rationale`, and (for `parallel_rationale: bounded-slice`) `files_to_modify[]` whose entries name the declared touch-set. Empty or single-element `unblocked_stories[]` is valid: the parallel-dispatch gate (Step 1.5) skips when there is no peer set to gate.
+**Inputs:** `env` with `HIVE_SESSIONS_ENABLED`, `HIVE_PARALLEL_TEAMS`, and `HIVE_DESIGN_MODE`; parsed root `hive.config.yaml` containing `sessions.enabled` and `parallel_teams` or `execution.parallel_teams`; parsed consumer `.pHive/hive.config.yaml` or `None`; parsed graduation registry workflow list or `None`; `workflow_name`; `epic_id` when known; `arguments` containing the `--sequential` flag state plus dependency-depth summary; and `unblocked_stories[]` — the depth-0 ready stories at this dispatch tick, each carrying at minimum `id`, `parallel_allowed`, `parallel_rationale`, and (for `parallel_rationale: bounded-slice`) `files_to_modify[]` whose entries name the declared touch-set. Empty or single-element `unblocked_stories[]` is valid: the parallel-dispatch gate (Step 1.5) skips when there is no peer set to gate.
 
-**Outputs:** `mode_decision` enum `sessions | team | team-cmux | sequential | sandcastle | multica | cc-workflows`; `mode_reason` as a one-line string explaining the selected mode; `runner_path` enum `hive-dag | orchestrator-narrated`; `runner_reason` as a one-line string explaining the selected runner path; `field_sources` map covering `sessions_enabled`, `parallel_teams`, `terminal_mux`, `executor`, `execution_mode`, and `execution_runtime` so callers can attribute every resolution; `field_sources.execution_runtime.epic_override` as a `<path>` traceability field when a per-epic disposition file overrode the auto heuristic, otherwise `null`; and `gate_violations[]` — a list of `{story_id, reason}` records emitted by Step 1.5 when the parallel-dispatch gate refuses fan-out. `gate_violations[]` is `[]` on healthy runs and on any `mode_decision` other than `team | team-cmux | sessions | sandcastle | multica | cc-workflows`.
+**Outputs:** `mode_decision` enum `sessions | team | sequential | sandcastle | multica | cc-workflows`; `mode_reason` as a one-line string explaining the selected mode; `runner_path` enum `hive-dag | orchestrator-narrated`; `runner_reason` as a one-line string explaining the selected runner path; `field_sources` map covering `sessions_enabled`, `parallel_teams`, `executor`, `execution_mode`, and `execution_runtime` so callers can attribute every resolution; `field_sources.execution_runtime.epic_override` as a `<path>` traceability field when a per-epic disposition file overrode the auto heuristic, otherwise `null`; and `gate_violations[]` — a list of `{story_id, reason}` records emitted by Step 1.5 when the parallel-dispatch gate refuses fan-out. `gate_violations[]` is `[]` on healthy runs and on any `mode_decision` other than `team | sessions | sandcastle | multica | cc-workflows`.
 
 `field_sources.execution_mode` tracks the source of an explicit override (sandcastle or multica): `env` when `HIVE_DESIGN_MODE={sandcastle|multica}` wins, `config` when `execution.mode: {sandcastle|multica}` from root `hive.config.yaml` wins, `default` when neither env nor config selects an override (fall-through to the standard mode resolution chain). Its precedence chain is `env > root config > shipped baseline > skill override > default`; current shipped baseline and skill override layers are traceability slots for downstream resolver stories and fall through when absent. Unlike the four existing fields, `execution_mode=default` does NOT trigger the loud "fell to defaults" warning — default is the normal case for non-override runs. The `execution_mode={source}` token is always appended to the telemetry line regardless of source.
 
 `field_sources.execution_runtime` tracks the source of the runtime disposition used by the mode resolver. Its precedence chain is `env > root config > shipped baseline > skill override > default`, with `default` resolving to `auto` when no higher layer selects an explicit runtime. `field_sources.execution_runtime.epic_override` is a `<path>` traceability field that records which `.pHive/cycle-state/<epic-id>.yaml` per-epic disposition file overrode the auto heuristic; it is `null` when no per-epic override was applied.
 
-**Side effects:** emit a structured warning only when consumer config sets `executor` to an unknown non-empty value, OR when any of the four tracked fields resolves to `default` (loud no-config warning + telemetry line). Missing consumer config, missing graduation registry, unset `executor`, false `executor_default`, and workflow-not-graduated remain normal fail-closed states and emit no warning for the runner gate itself.
+**Side effects:** emit a structured warning only when consumer config sets `executor` to an unknown non-empty value, OR when any of the three tracked fields resolves to `default` (loud no-config warning + telemetry line). Missing consumer config, missing graduation registry, unset `executor`, false `executor_default`, and workflow-not-graduated remain normal fail-closed states and emit no warning for the runner gate itself.
 
 ## Input semantics
 
@@ -32,14 +32,13 @@ The mode selection uses these exact match conditions, in precedence order:
 2. **Parallel teams config check:** evaluate the resolved `parallel_teams` boolean from Step 0 below. The legacy reads (root `hive.config.yaml` `parallel_teams` or `execution.parallel_teams`) become the config-source path inside Step 0; this step matches whenever the resolved boolean is `true`.
 3. **Concurrency and flag check:** match only when the dependency-depth summary shows more than one story at the same depth AND `arguments` does not contain `--sequential`.
 
-The cmux variant is not a separate team gate. After the parallel config and concurrency checks match, return `team-cmux` when the resolved `terminal_mux` from Step 0 equals `cmux`; otherwise return `team`.
+There is one local team path. After the parallel config and concurrency checks match, return `team`.
 
 ## Sane Defaults
 
 When neither env nor config sets a value, apply these defaults — better baseline for fresh repos per D4 Position A fold-in:
 
 - `parallel_teams` → `true` (collaborative is the better default when more than one story sits at a given depth)
-- `terminal_mux` → `tmux` (broadest compat across consumers)
 - `sessions_enabled` → `false` (sessions remain opt-in)
 - `executor` → `orchestrator-narrated` (fail-closed per Q4 lock; hive-dag requires explicit consumer flag plus registry)
 
@@ -59,10 +58,6 @@ For `execution_mode` and `execution_runtime`, record the expanded source chain a
   - env path: `env.HIVE_PARALLEL_TEAMS` truthy → `true`, falsy explicit (`0`, `false`, `"false"`) → `false`, source `env`
   - config path: root `hive.config.yaml parallel_teams` or `execution.parallel_teams` set → that boolean, source `config`
   - default: `true`, source `default`
-- `terminal_mux`:
-  - env path: `env.HIVE_TERMINAL_MUX` set (non-empty) → that string, source `env`
-  - config path: root `hive.config.yaml execution.terminal_mux` set → that string, source `config`
-  - default: `tmux`, source `default`
 - `executor`:
   - Always read from consumer `.pHive/hive.config.yaml` per Q4 lock. Env never overrides — env path is intentionally absent for this field.
   - config path: consumer config `executor: hive-dag` with `executor_default` truthy → `hive-dag`, source `config`
@@ -82,16 +77,16 @@ For `execution_mode` and `execution_runtime`, record the expanded source chain a
 
 Env wins over config when both are set for the same field (e.g. `HIVE_DESIGN_MODE=sandcastle` with `execution.mode: multica` — sandcastle wins). This is enforced by `resolveMode` tier ordering.
 
-When ANY of the four fields (`sessions_enabled`, `parallel_teams`, `terminal_mux`, `executor`) resolves with source `default`, emit a loud warning before returning, enumerating each defaulted field and the override path:
+When ANY of the three fields (`sessions_enabled`, `parallel_teams`, `executor`) resolves with source `default`, emit a loud warning before returning, enumerating each defaulted field and the override path:
 
 ```
-WARNING: Backend auto-resolved fields fell to defaults — sessions_enabled=false, parallel_teams=true, terminal_mux=tmux, executor=orchestrator-narrated. Override in hive.config.yaml (or env: HIVE_SESSIONS_ENABLED, HIVE_PARALLEL_TEAMS, HIVE_TERMINAL_MUX; executor lives in consumer .pHive/hive.config.yaml).
+WARNING: Backend auto-resolved fields fell to defaults — sessions_enabled=false, parallel_teams=true, executor=orchestrator-narrated. Override in hive.config.yaml (or env: HIVE_SESSIONS_ENABLED, HIVE_PARALLEL_TEAMS; executor lives in consumer .pHive/hive.config.yaml).
 ```
 
 Emit one printable inline telemetry line covering every field resolution:
 
 ```
-[telemetry] backend_resolution sessions_enabled={source} parallel_teams={source} terminal_mux={source} executor={source} execution_mode={source}
+[telemetry] backend_resolution sessions_enabled={source} parallel_teams={source} executor={source} execution_mode={source}
 ```
 
 ### Step 1: Resolve Mode Decision
@@ -153,14 +148,13 @@ Evaluate in this order and stop at the first selected path:
 2. If parallel teams config is not true, return `mode_decision=sequential` and `mode_reason=parallel-teams-disabled`.
 3. If the dependency-depth summary does not show multiple stories at the same depth, return `mode_decision=sequential` and `mode_reason=no-peer-depth`.
 4. If `--sequential` is present in `arguments`, return `mode_decision=sequential` and `mode_reason=sequential-flag`.
-5. When the resolved `terminal_mux` field (from Step 0, env > config > default) equals `cmux`, return `mode_decision=team-cmux` and `mode_reason=team-checks-pass-cmux`.
-6. Otherwise return `mode_decision=team` and `mode_reason=team-checks-pass`.
+5. Return `mode_decision=team` and `mode_reason=team-checks-pass`.
 
-This preserves precedence: `sessions > team-cmux > team > sequential`.
+This preserves precedence: `sessions > team > sequential`.
 
 ### Step 1.5: Parallel-Dispatch Gate (ed-7)
 
-**Precondition:** only reached when `mode_decision ∈ {team, team-cmux, sessions, sandcastle, multica, cc-workflows}` AND `unblocked_stories[]` has length > 1. When `mode_decision` is `sequential`, or when the peer set has fewer than two stories, skip this step entirely — there is no parallel fan-out to gate. The gate also runs when `mode_decision` is `sandcastle`, `multica`, or `cc-workflows` because the provider fans out one assignment per depth-0 story.
+**Precondition:** only reached when `mode_decision ∈ {team, sessions, sandcastle, multica, cc-workflows}` AND `unblocked_stories[]` has length > 1. When `mode_decision` is `sequential`, or when the peer set has fewer than two stories, skip this step entirely — there is no parallel fan-out to gate. The gate also runs when `mode_decision` is `sandcastle`, `multica`, or `cc-workflows` because the provider fans out one assignment per depth-0 story.
 
 The gate refuses parallel dispatch unless **every** story in `unblocked_stories[]` is properly annotated. Default-serial is the contract: a story without explicit opt-in MUST fall back to sequential dispatch. Initialize `gate_violations: []` and evaluate the following checks in order; record one record per offending story and continue (do NOT short-circuit on the first failure — the warning enumerates the full set so a single fix pass resolves all of them).
 

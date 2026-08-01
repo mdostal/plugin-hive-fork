@@ -195,14 +195,14 @@ Standard executor event envelope (`run_id`, `step_id`, `event_type`, `timestamp`
 | Section | Meaning |
 |---------|---------|
 | `always_grantable` | Low-blast tools (Read, Grep, Glob, LS) any step may grant |
-| `escalatable` | High-blast tools (Bash, Write, Edit, codex, cmux) — listed = allowed; unlisted = `ToolNotEscalatableError` |
+| `escalatable` | High-blast tools (Bash, Write, Edit, codex) — listed = allowed; unlisted = `ToolNotEscalatableError` |
 | `persona_deny.<tool>` | Personas that may **never** receive `<tool>` via override (e.g. `codex` is denied to `reviewer`, `peer-validator`, `security-reviewer` so verifier isolation holds) — violation raises `BackendIsolationViolationError` |
 
 A step that *narrows* a tool already in the persona default (`Bash(git *)` against persona `Bash`) is treated as a constraint, not a grant — the allow-list is not consulted.
 
 ### Platform check (Risk #11)
 
-Tools `codex` and `cmux` are macOS-only by upstream constraint. When a step grants either on a non-Darwin platform, `compose_tool_policy` raises `PlatformIncompatibilityError`. **No silent fallback** — surfacing the mismatch at policy resolution time prevents cryptic agent-runtime confusion.
+Tool `codex` is macOS-only by upstream constraint. When a step grants either on a non-Darwin platform, `compose_tool_policy` raises `PlatformIncompatibilityError`. **No silent fallback** — surfacing the mismatch at policy resolution time prevents cryptic agent-runtime confusion.
 
 ## Pause / Approve Gates (`node_type: pause`)
 

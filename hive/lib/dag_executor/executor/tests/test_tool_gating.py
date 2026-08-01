@@ -8,7 +8,7 @@ Second-factor checks (security:plan-audit findings #6 + #7) — the
 allow-list in escalatable_tools.yaml and the per-persona deny-list
 form the second factor on top of the audit event.
 
-Risk #11 — macOS-only tools (codex, cmux) raise on non-Darwin.
+Risk #11 — macOS-only tools (codex) raise on non-Darwin.
 """
 
 from __future__ import annotations
@@ -209,19 +209,6 @@ def test_macos_only_codex_on_linux_raises():
     assert "codex" in str(exc.value)
     assert "Linux" in str(exc.value)
 
-
-def test_macos_only_cmux_on_linux_raises():
-    """cmux requested on Linux raises PlatformIncompatibilityError."""
-
-    with patch.object(tool_gating, "_PLATFORM", "Linux"):
-        with pytest.raises(PlatformIncompatibilityError):
-            compose_tool_policy(
-                ["Read"],
-                ["Read", "cmux"],
-                None,
-                "rid-1",
-                "step-1",
-            )
 
 
 def test_macos_only_codex_on_darwin_passes():

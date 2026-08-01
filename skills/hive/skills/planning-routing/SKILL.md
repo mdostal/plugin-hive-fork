@@ -21,8 +21,8 @@ Do not call it again after successful teammate creation unless abandoning the pr
 **Side effects:** emits exactly one INFO log line per persona at final spawn
 decision; calls `plan-mode-cc-workflows` for CC-Workflows-routed personas;
 invokes the DAG front door (`hive.lib.dag_executor.run`) for Multica-routed personas; auto-spawns
-direct-routed personas via natural-language team description; calls `agent-spawn` -> `codex-invoke` for
-Codex-routed personas.
+direct-routed personas via natural-language team description; and dispatches
+Codex-routed personas through native Multica issue assignment.
 
 INFO log requested field uses planning-routing vocabulary:
 `cc-workflows|multica|codex|direct|unset`.
@@ -67,8 +67,8 @@ Graph completion is an artifact-readiness signal only — never a user sign-off.
 
 Otherwise, for each persona in `assembled_personas`, consult `agent_backends`
 using the root-first precedence contract already resolved by the caller. Compare
-the configured backend against `skills/hive/skills/codex-invoke/SKILL.md`
-`Supported personas (PoC)` and `Known-incompatible personas`.
+the configured backend against the native Multica Codex support matrix:
+supported personas route to `codex`; known-incompatible personas route `direct`.
 
 Produce `routing_decisions` with one value per persona: `multica`, `codex`, or
 `direct`. Also store tentative `routing_reason` for Step 0.3 final INFO emission.
@@ -79,7 +79,7 @@ Produce `routing_decisions` with one value per persona: `multica`, `codex`, or
 - When `agent_backends[persona] == claude`, route `direct` with reason `claude-requested` (configured Claude personas use the direct auto-spawn path; the value `claude` is canonical per hive.config.yaml `Supported backends: claude | codex`).
 - When `agent_backends[persona]` is unset or `agent_backends` is absent, route `direct` with reason `agent_backends-unset`.
 
-Apply this only to personas present in the assembled list. `ui-designer` is always `direct` even when configured to `codex`, because codex-invoke marks it known-incompatible. Step 0.2 does not emit INFO logs.
+Apply this only to personas present in the assembled list. `ui-designer` is always `direct` even when configured to `codex`, because native Multica Codex marks it known-incompatible. Step 0.2 does not emit INFO logs.
 
 ### Step 0.3: Spawn Across Three Paths
 
@@ -116,11 +116,11 @@ Use `routing_decisions` to assemble one conceptual planning team:
   after the graph completes. Do not also create local teammates for a
   multica-routed persona unless DAG fallback is triggered.
 - **Direct path (natural-language auto-spawn):** collect every persona routed `direct` and describe each as a named teammate; the runtime materializes them automatically. Parallel dispatch is the default for eligible teammate sets; `execution.parallel_teams: false` or `--sequential` forces sequential execution. Use Step 0.4 and include only direct-routed personas in `## Team Members`.
-- **Codex path (`agent-spawn` -> `codex-invoke`):** for each persona routed `codex`, create a separate persistent-pane teammate through `agent-spawn`, passing full persona context, resolved paths, memory loading context, and the same planning-team coordination context direct teammates receive.
+- **Codex path (native Multica issue assignment):** for each persona routed `codex`, assign the persona's planning issue to the native Multica Codex-backed agent, passing full persona context, resolved paths, memory loading context, and the same planning-team coordination context direct teammates receive.
 
 Mixed teams are valid. Some planning personas may come from
 `plan-mode-cc-workflows`, some from the DAG front-door path (plan graph), some
-from the direct auto-spawn path, and others from `agent-spawn` -> `codex-invoke`; they are
+from the direct auto-spawn path, and others from native Multica issue assignment; they are
 still one planning team. The caller remains coordinator and uses `SendMessage`
 for assignments and review loops where local teammate handles exist, and uses the
 `plan-mode-cc-workflows` summaries and episode markers for CC-Workflows-produced
@@ -131,7 +131,7 @@ Step 0.5 handles a runtime Multica or Codex failure, update that persona's resul
 to the fallback outcome instead of adding a second line.
 
 Preserve the 4-field template exactly:
-- `[info] planning routing: persona={X} requested={cc-workflows|multica|codex|direct|unset} path={plan-mode-cc-workflows|dag-plan-graph|codex-invoke|auto-spawn} reason={reason}`
+- `[info] planning routing: persona={X} requested={cc-workflows|multica|codex|direct|unset} path={plan-mode-cc-workflows|dag-plan-graph|native-multica-codex|auto-spawn} reason={reason}`
 
 Valid `reason=` values:
 - `no-fallback-needed`
@@ -146,11 +146,11 @@ Valid `reason=` values:
 
 Examples:
 - `[info] planning routing: persona=researcher requested=cc-workflows path=plan-mode-cc-workflows reason=no-fallback-needed`
-- `[info] planning routing: persona=researcher requested=cc-workflows path=codex-invoke reason=cc-workflows-precondition-failed: claude-version-too-low`
+- `[info] planning routing: persona=researcher requested=cc-workflows path=native-multica-codex reason=cc-workflows-precondition-failed: claude-version-too-low`
 - `[info] planning routing: persona=researcher requested=multica path=dag-plan-graph reason=no-fallback-needed`
-- `[info] planning routing: persona=researcher requested=multica path=codex-invoke reason=multica-daemon-down: ECONNREFUSED`
+- `[info] planning routing: persona=researcher requested=multica path=native-multica-codex reason=multica-daemon-down: ECONNREFUSED`
 - `[info] planning routing: persona=ui-designer requested=multica path=auto-spawn reason=multica-daemon-down: ECONNREFUSED`
-- `[info] planning routing: persona=technical-writer requested=codex path=codex-invoke reason=no-fallback-needed`
+- `[info] planning routing: persona=technical-writer requested=codex path=native-multica-codex reason=no-fallback-needed`
 - `[info] planning routing: persona=ui-designer requested=codex path=auto-spawn reason=known-incompatible`
 - `[info] planning routing: persona={X} requested=codex path=auto-spawn reason=unvalidated-persona`
 - `[info] planning routing: persona={X} requested=direct path=auto-spawn reason=no-fallback-needed`
@@ -232,11 +232,11 @@ missing), handle it gracefully:
 
 1. Do not hard-fail planning-team assembly.
 2. Re-route each affected persona to Codex when that persona is supported by
-   `codex-invoke` and not known-incompatible; otherwise re-route it to direct auto-spawn.
+   `multica:codex` and not known-incompatible; otherwise re-route it to direct auto-spawn.
 3. If the Codex fallback for an affected persona also fails, apply the Codex
    fallback rules below and end at direct auto-spawn.
 4. Update the Step 0.3 INFO log outcome for each affected persona:
-   `[info] planning routing: persona={X} requested=cc-workflows path={codex-invoke|auto-spawn} reason=cc-workflows-precondition-failed: {error}`
+   `[info] planning routing: persona={X} requested=cc-workflows path={native-multica-codex|auto-spawn} reason=cc-workflows-precondition-failed: {error}`
    where `{error}` is truncated to 120 chars and reflects the
    `field_sources` citation from the structured precondition_failed payload.
 5. Continue the planning flow.
@@ -250,7 +250,7 @@ gracefully:
 2. Re-route the failed persona to Codex when supported, otherwise direct auto-spawn.
 3. If the Codex fallback also fails, apply the Codex fallback rules below.
 4. Update the Step 0.3 INFO log outcome for that persona:
-   `[info] planning routing: persona={X} requested=cc-workflows path={codex-invoke|auto-spawn} reason=cc-workflows-dispatch-failed: {error}`
+   `[info] planning routing: persona={X} requested=cc-workflows path={native-multica-codex|auto-spawn} reason=cc-workflows-dispatch-failed: {error}`
    where `{error}` is truncated to 120 chars.
 5. Continue the planning flow.
 
@@ -261,11 +261,11 @@ error during `binding=multica` init), handle it gracefully:
 
 1. Do not hard-fail planning-team assembly.
 2. Re-route each affected persona to Codex when that persona is supported by
-   `codex-invoke` and not known-incompatible; otherwise re-route it to direct auto-spawn.
+   `multica:codex` and not known-incompatible; otherwise re-route it to direct auto-spawn.
 3. If the Codex fallback for an affected persona also fails, apply the Codex
    fallback rules below and end at direct auto-spawn.
 4. Update the Step 0.3 INFO log outcome for each affected persona:
-   `[info] planning routing: persona={X} requested=multica path={codex-invoke|auto-spawn} reason=multica-daemon-down: {error}`
+   `[info] planning routing: persona={X} requested=multica path={native-multica-codex|auto-spawn} reason=multica-daemon-down: {error}`
    where `{error}` is truncated to 120 chars.
 5. Continue the planning flow.
 
@@ -277,11 +277,11 @@ handle it gracefully:
 2. Re-route the failed persona to Codex when supported, otherwise direct auto-spawn.
 3. If the Codex fallback also fails, apply the Codex fallback rules below.
 4. Update the Step 0.3 INFO log outcome for that persona:
-   `[info] planning routing: persona={X} requested=multica path={codex-invoke|auto-spawn} reason=multica-dispatch-failed: {error}`
+   `[info] planning routing: persona={X} requested=multica path={native-multica-codex|auto-spawn} reason=multica-dispatch-failed: {error}`
    where `{error}` is truncated to 120 chars.
 5. Continue the planning flow.
 
-If `codex-invoke` dispatch FAILS at runtime for any persona (Codex CLI missing, auth expired, cmux pane creation error, pre-flight failure, timeout, or any error returned from `agent-spawn`/`codex-invoke`), handle it gracefully:
+If `multica:codex` dispatch FAILS at runtime for any persona (Codex CLI missing, auth expired, pre-flight failure, timeout, or any error returned from `agent-spawn`/`multica:codex`), handle it gracefully:
 
 1. Do not hard-fail planning-team assembly.
 2. Re-route the failed persona to direct auto-spawn in a follow-up call. Re-compose the prompt to add the failed persona, or use `SendMessage` to instruct existing named teammates to adopt the re-routed teammate.

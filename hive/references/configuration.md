@@ -184,7 +184,7 @@ Some Hive assets are maintainer-only and are used to improve the plugin itself r
 
 The `maintainer-skills/` directory is excluded from marketplace distribution via `marketplace.json` under the Slice 5 story `marketplace-exclude-maintainer-skills`.
 
-Maintainer defaults such as Codex backends, Opus routing, and `cmux` terminal mux preferences do not ship. For the same reason, maintainer-only keys are intentionally absent from the shipped settings reference, including `execution.terminal_mux` and `execution.idle_timeout_seconds`. External model routing under `agent_backends` is documented in the `### Agent Backends` section above.
+Maintainer defaults such as Codex backends, Opus routing, and native runtime preferences do not ship. For the same reason, maintainer-only keys are intentionally absent from the shipped settings reference and `execution.idle_timeout_seconds`. External model routing under `agent_backends` is documented in the `### Agent Backends` section above.
 
 See also:
 - `hive/references/state-boundary.md`

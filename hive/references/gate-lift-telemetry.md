@@ -23,7 +23,7 @@ Path: `.pHive/metrics/events/gate-lift-<ISO 8601>.jsonl` (one record per file; o
 ### backend_resolution (a-34, inline stdout)
 
 ```
-[telemetry] backend_resolution sessions_enabled={source} parallel_teams={source} terminal_mux={source} executor={source}
+[telemetry] backend_resolution sessions_enabled={source} parallel_teams={source} executor={source}
 ```
 
 Each `{source}` is one of: `flag`, `env`, `hive-config`, `default`. Captured by stop-hook stream. Same non-canonical caveat as methodology_resolution.

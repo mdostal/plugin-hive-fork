@@ -45,7 +45,7 @@ Branch on `mode_decision`:
 
 - **`multica`** → hand off to `skills/hive/skills/design-mode-multica/SKILL.md` (forward declaration; ships in d-3). Stop here; do not continue inline.
 - **`cc-workflows`** → hand off to `skills/hive/skills/design-mode-cc-workflows/SKILL.md` (forward declaration; ships in d-4). Stop here; do not continue inline.
-- **any other value** (`sessions`, `team`, `team-cmux`, `sequential`, `sandcastle`) → continue inline below. The remaining process steps execute in the current agent thread.
+- **any other value** (`sessions`, `team`, `sequential`, `sandcastle`) → continue inline below. The remaining process steps execute in the current agent thread.
 
 ### 1. Parse the brief and resolve the topic slug
 

@@ -433,15 +433,15 @@ parallel_rationale: read-only
 #### 4.4.3 `bounded-slice` — narrow declared write surface
 
 ```yaml
-id: cmux-add-logging-hook
-depends_on: [cmux-pane-spawn-base]
+id: terminal-logging-hook
+depends_on: [agent-spawn-base]
 parallel_allowed: true
 parallel_rationale: bounded-slice
 files_to_modify:
-  - file: hive/lib/cmux/pane_hooks.mjs
+  - file: hive/lib/agent/hooks.mjs
     change: register new "log" hook
-# Slice boundary: hive/lib/cmux/pane_hooks.mjs only. No other concurrent
-# story in this epic writes anywhere under hive/lib/cmux/.
+# Slice boundary: hive/lib/agent/hooks.mjs only. No other concurrent
+# story in this epic writes anywhere under hive/lib//.
 ```
 
 ## 5. Review checklist (for /plan + /review)

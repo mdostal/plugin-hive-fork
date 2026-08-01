@@ -30,8 +30,8 @@ test('resolvePersonaBackend: claude passes through unchanged', () => {
   assert.equal(resolvePersonaBackend('dev', { dev: 'claude' }), 'claude');
 });
 
-test('resolvePersonaBackend: codex passes through unchanged', () => {
-  assert.equal(resolvePersonaBackend('reviewer', { reviewer: 'codex' }), 'codex');
+test('resolvePersonaBackend: codex alias expands to multica:codex', () => {
+  assert.equal(resolvePersonaBackend('reviewer', { reviewer: 'codex' }), 'multica:codex');
 });
 
 test('resolvePersonaBackend: unknown value falls back to claude', () => {
@@ -71,7 +71,16 @@ test('brief for multica:gemini backend omits /codex:rescue', () => {
   assert.doesNotMatch(brief, /\/codex:rescue/);
 });
 
-// ── dispatch: multica:* routes through Multica issue-assign (no cmux) ─────
+test('brief for codex alias omits /codex:rescue', () => {
+  const brief = serializeStoryBrief(story(), {
+    dispatchingPersona: 'reviewer',
+    agents: [{ name: 'reviewer', provider: 'claude' }],
+    agentBackends: { reviewer: 'codex' },
+  });
+  assert.doesNotMatch(brief, /\/codex:rescue/);
+});
+
+// ── dispatch: multica:* routes through Multica issue-assign ───────────────
 
 async function startMockServer(handler) {
   const server = http.createServer(async (req, res) => {
@@ -105,7 +114,7 @@ test.beforeEach(() => {
   __resetCache();
 });
 
-test('multica:opencode backend dispatches via Multica issue-assign, not cmux', async () => {
+test('multica:opencode backend dispatches via Multica issue-assign', async () => {
   const agents = [{ id: 'agent-developer', name: 'developer', provider: 'claude' }];
   const issueState = { 'issue-developer': { description: 'old', status: 'backlog' } };
   const calls = [];
@@ -144,7 +153,7 @@ test('multica:opencode backend dispatches via Multica issue-assign, not cmux', a
     assert.equal(result.dispatches[0].persona, 'developer');
     assert.equal(result.dispatches[0].agent_uuid, 'agent-developer');
 
-    // Dispatch must go via Multica issue-assign PUT (no cmux, no Messages-API call)
+    // Dispatch must go via Multica issue-assign PUT, not the Messages-API call.
     const assignmentCalls = calls.filter(
       (c) => c.method === 'PUT' && c.body?.assignee_type === 'agent',
     );

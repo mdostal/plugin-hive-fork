@@ -52,31 +52,17 @@ For each skill in `persona_context.frontmatter.skills`:
 
 Invoke `skills/hive/skills/backend-dispatch/SKILL.md` with:
 - `persona_context`, `agent_backends` map from root `hive.config.yaml`, optional `backend_override`
-- `prompt_parts` assembled from §7.1–§7.5 below (the cmux path splits these across system + task prompt files; see §7.3)
-- `caller_mode` (`team-execution` or `standalone`), `pane_mode` (`one-shot` or `persistent`, codex only), and `existing_surface_id` (codex persistent follow-up only)
+- `prompt_parts` assembled from §7.1–§7.5 below
+- `caller_mode` (`team-execution` or `standalone`)
 
-Consume `resolved_backend`, `dispatch_decision`, and `dispatch_result`. When `resolved_backend == codex` the skill delegates to `codex-invoke`; respawn handling (§7b) and episode reporting (§8) still apply on the surrounding agent-spawn procedure.
+Consume `resolved_backend`, `dispatch_decision`, and `dispatch_result`. Native runtime backends are fully handed off by the backend dispatch atom; respawn handling (§7b) and episode reporting (§8) still apply on the surrounding agent-spawn procedure when the Claude path is selected.
 
-#### 7.1 Resolve terminal multiplexer and pane mode
+Native runtime backends (`multica:<runtime>`, including the `codex` alias) return
+`dispatch_decision=multica-issue-assign` and do not use any terminal pane.
 
-Read `hive.config.yaml` → `execution.terminal_mux`. Values:
+#### 7.1 `Agent(name:)` call (claude backend)
 
-- `tmux` (default): use `Agent(name:)` which spawns tmux panes natively
-- `cmux`: spawn the agent in a cmux split pane via the cmux CLI
-- `auto`: check `which cmux` first; if available, use cmux; otherwise tmux
-
-Also read `execution.interactive_panes` (default: `true`). This controls
-whether cmux-spawned agents (both Claude and Codex backends) launch in
-interactive mode or one-shot mode:
-
-- `true`: launch in interactive mode. The agent stays alive for follow-up
-  messages from the orchestrator. Required for cmux team execution (step 6b).
-- `false`: launch in one-shot mode (`claude -p` / `codex exec`). Agent
-  receives one prompt, runs, exits. No follow-up messaging possible.
-
-#### 7.2 `Agent(name:)` call (claude backend, tmux path)
-
-When `terminal_mux` resolves to `tmux`, use the standard `Agent(name:)` call:
+For `resolved_backend=claude`, use the standard `Agent(name:)` call:
 
 ```
 Agent(
@@ -87,7 +73,7 @@ Agent(
 )
 ```
 
-**Completion contract (tmux/`Agent(name:)` path only — E5 s1):** this is the
+**Completion contract (`Agent(name:)` path only — E5 s1):** this is the
 only dispatch path `SubagentStop` fires for, and `hooks/notify-agent-complete.sh`
 derives its verdict solely from a self-written `<cwd>/.hive-task-status.json`
 marker (no exit-status field exists in the payload — see
@@ -106,118 +92,12 @@ read downstream as failure, never success — so skipping this step silently
 fails the story even if your work was correct.
 ```
 
-Not required on the cmux path (no `SubagentStop` binding; completion is
-detected via the `[STORY-COMPLETE:{story-id}]` scrollback marker instead —
-see §7.3 step 11) or for Bash `run_in_background` dispatch (no completion
+Not required for native Multica runtime issue assignment (completion arrives as
+an issue comment) or for Bash `run_in_background` dispatch (no completion
 hook exists for that path at all — carve-out, not fixed).
-#### 7.3 cmux pane spawn (claude backend, cmux path)
-When `terminal_mux` resolves to `cmux`, spawn the agent in a visible cmux
-split pane instead of using the `Agent` tool:
-1. **Pre-flight:** `which cmux` — if missing, fall back to tmux path with a
-   warning (not a hard-fail; cmux is a visibility preference, not a backend).
-2. **Open pane:** `cmux new-split right` in the current workspace.
-   (v2: `surface.split`)
-3. **Capture surface:** `cmux tree` before and after the split — diff to
-   identify the new surface ref (e.g., `surface:13`). Record `surface_id`.
-   (v2: `system.tree`)
-4. **Prepare prompt files:** split the prompt into two temp files via `mktemp`:
-   **System prompt file** (`<persona-tempfile>`): contains the agent's identity
-   and constraints — everything that should be a system-level instruction:
-   - Persona — `persona_context.persona_text`
-   - Domain note — "You may modify files matching: {allow patterns}."
-   - Prior knowledge — relevant memories
-   **Task prompt file** (`<task-tempfile>`): contains the work assignment —
-   everything that should be a user-level message:
-   - Applicable skills
-   - Continuation context (respawn only)
-   - Task — the story spec, step instructions, and inputs from prior steps
-   This split matters: with `--append-system-prompt-file`, the persona is
-   injected as a system instruction with full authority. With `Agent(name:)`,
-   the `prompt` parameter handled this implicitly. In cmux panes, we must be
-   explicit — persona-as-user-message loses authority and agents drift.
 
-5. **Build the allowed tools list:** read `persona_context.frontmatter.tools`.
-   Map each tool name to the `--allowedTools` format:
-   - Standard tools: `Bash`, `Edit`, `Read`, `Write`, `Grep`, `Glob`
-   - Tool patterns: `Bash(git *)`, `Bash(npm *)`, etc.
-   - If `persona_context.domain_constraints` has allow patterns, include `Edit`
-     and `Write` scoped to those patterns where possible
-   Also resolve `--permission-mode`:
-   - If running in a worktree: `auto` (pre-approve safe operations)
-   - If running in the main tree: `default` (prompt for destructive ops)
-   - Caller can override via `permission_mode_override`
-6. **Launch claude in the pane:** choose mode based on `execution.interactive_panes`:
-   **One-shot mode** (`interactive_panes: false`):
-   ```
-   cmux send --surface <id> "claude -p --model <model> \
-     --append-system-prompt-file <persona-tempfile> \
-     --allowedTools '<tool-list>' \
-     --permission-mode <mode> \
-     - < <task-tempfile>"
-   cmux send-key --surface <id> enter
-   ```
-   (`cmux send` v2: `surface.send_text`; `cmux send-key` v2: `surface.send_key`)
-   **Interactive mode** (`interactive_panes: true`, default):
-   ```
-   cmux send --surface <id> "claude --model <model> \
-     --append-system-prompt-file <persona-tempfile> \
-     --allowedTools '<tool-list>' \
-     --permission-mode <mode>"
-   cmux send-key --surface <id> enter
-   ```
-   Wait for the session to initialize (poll `surface.read_text` for the claude
-   prompt indicator), then deliver the task via a file-backed send to avoid
-   shell-escaping issues with quotes, backticks, and `$` content regardless
-   of prompt size:
-   ```
-   cmux send --surface <id> --from-file <task-tempfile>
-   cmux send-key --surface <id> enter
-   ```
-   If the cmux version in use does not support `--from-file`, fall back to
-   `cmux send --surface <id> "$(cat <task-tempfile>)"` — but this is best-effort
-   and may mangle special characters.
-   **Note:** cmux team execution (execute step 6b) requires `interactive_panes: true`.
-   If the orchestrator detects `interactive_panes: false` with `terminal_mux: cmux`
-   and parallel stories, it should warn and fall back to the `Agent(name:)` tmux path.
-7. **Clean up temp files** after delivery. Remove both `<persona-tempfile>` and
-   `<task-tempfile>`.
-8. **Record in episode:** surface_id, terminal_mux: cmux, pane direction,
-   permission_mode, allowed_tools list.
-   The user can focus this pane anytime via `cmux focus-pane --pane <id>`
-   (v2: `pane.focus`). Capture output later via
-   `cmux read-screen --surface <id> --scrollback` (v2: `surface.read_text`).
-9. **Completion handling depends on caller mode:**
-   - **Team execution mode (execute step 6b):** return immediately after spawn
-     with `surface_id`. Do not poll for completion and do not close the pane
-     here — the orchestrator's poll loop owns completion detection and cleanup.
-   - **Standalone spawn mode:** poll `cmux read-screen --surface <id>`
-     (v2: `surface.read_text`) every 10 seconds until the shell prompt (`$` or
-     `%`) reappears on the last line, which indicates `claude` exited. Use the
-     step timeout from `circuit_breakers` as the max polling duration; on
-     timeout, capture scrollback and hard-fail instead of continuing to
-     cleanup/reporting early. Also check `surface.health` periodically — if the
-     surface is no longer healthy, claude has exited unexpectedly. Capture
-     scrollback and report failure.
-10. **Close policy depends on caller mode:**
-    - **Team execution mode:** orchestrator closes surfaces during global cleanup
-      (execute step 6b). Do not close here.
-    - **Standalone spawn mode:** close the pane after capturing output via
-      `cmux read-screen --scrollback`: `cmux close-surface --surface <id>`
-      (v2: `surface.close`). Skip if capture failed so the user can inspect
-      manually.
-11. **Completion marker (team execution only):** when the agent's workflow
-    completes successfully, emit `[STORY-COMPLETE:{story-id}]` as the final
-    output line. The orchestrator's poll loop watches for this marker via
-    `surface.read_text`. If the agent crashes or times out without emitting the
-    marker, `surface.health` is the fallback detection.
-
-The cmux path splits the prompt differently from the tmux path: persona,
-domain, and memories go into `--append-system-prompt-file` (system-level authority),
-while skills, continuation context, and the task go as the first user message.
-Memory loading, skill injection, and respawn continuation are identical in
-content — only the injection point differs.
 **Prompt structure (shared by both paths):**
-For the **tmux path** (`Agent(name:)`), all six parts are concatenated into
+For the **Claude path** (`Agent(name:)`), all six parts are concatenated into
 the single `prompt` parameter — the framework handles system-level injection:
 1. **Persona** — `persona_context.persona_text`
 2. **Domain note** — "You may modify files matching: {allow patterns}."
@@ -225,19 +105,7 @@ the single `prompt` parameter — the framework handles system-level injection:
 4. **Applicable skills** — skill content if any matched
 5. **Continuation Context** (respawn only) — see step 7b below
 6. **Task** — the story spec, step instructions, any inputs from prior steps,
-   and (tmux/`Agent(name:)` path only) the Completion Contract from §7.2
-For the **cmux path**, the same content is split across two injection points:
-*System prompt file* (via `--append-system-prompt-file`):
-1. **Persona** — `persona_context.persona_text`
-2. **Domain note**
-3. **Prior knowledge**
-*Task prompt* (first user message):
-4. **Applicable skills**
-5. **Continuation Context** (respawn only)
-6. **Task**
-This split ensures the persona has system-level authority. Skills and task
-content work correctly as user messages since they're instructions to execute,
-not identity to embody.
+   and (Claude `Agent(name:)` path only) the Completion Contract from §7.1
 
 ### 7b. Handle respawn continuation (optional)
 
@@ -264,18 +132,15 @@ If `respawn_summary_path` is NOT provided, skip this step entirely — behavior 
 
 After spawning, report:
 - Agent name and model tier used
-- Backend: claude (`Agent(name:)`) | codex (cmux pane via codex-invoke)
-- Terminal mux: tmux (`Agent(name:)`) | cmux (surface id: X)
+- Backend: claude (`Agent(name:)`) | multica:<runtime> (issue assignment)
 - Respawn: yes (iteration {N} of 3) | no (fresh spawn)
 - Required tools: `persona_context.validated_tools` available / missing (with fallback)
 - Memories loaded: count and names
 - Skills injected: count and names
 - Continuation context: loaded from {path} | none
 - Domain restrictions communicated
-- Backend-specific info (codex only): surface id, transcript path, meta path,
-  approval policy + source, thread id (or null)
-- Pane mode (codex only): one-shot | persistent. If persistent, surface_id is
-  returned for reuse by subsequent steps (implement, fix-loop, shutdown).
+- Backend-specific info (native runtime only): assigned issue id, agent uuid,
+  runtime tag, and polling/episode marker path.
 
 ## Key Rules
 

@@ -25,11 +25,10 @@ Phase ordering:
 ### TDD-Codex (Cross-Model Test-Driven Development)
 Research → Test Spec → Open Codex Pane → Implement → Review → Fix Loop → Integrate → Shutdown
 
-Variant of TDD using a split-model path. Claude writes the failing tests and performs review; Codex handles implementation and follow-up fixes in a persistent cmux pane.
+Variant of TDD using a split-model path. Claude writes the failing tests and performs review; Codex handles implementation and follow-up fixes in anative Multica Codex assignment.
 
 Requirements:
 - `agent_backends` configured to route the implementation persona to `codex`
-- `cmux` installed for the visible persistent pane path
 
 ### BDD (Behavior-Driven Development)
 Research → Behavior Spec → Implement → Test → Review → Integrate

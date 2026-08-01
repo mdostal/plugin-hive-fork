@@ -54,7 +54,7 @@ At `medium` / `high` / `low`, or when the file is absent/unreadable, this is a n
 
 Call `skills/hive/skills/review-dispatch/SKILL.md` once before doing any other work. Pass:
 
-- `env` — current process environment (at minimum `HIVE_SESSIONS_ENABLED`, `HIVE_PARALLEL_TEAMS`, `HIVE_TERMINAL_MUX`, `HIVE_REVIEW_MODE`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`)
+- `env` — current process environment (at minimum `HIVE_SESSIONS_ENABLED`, `HIVE_PARALLEL_TEAMS`, `HIVE_REVIEW_MODE`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`)
 - `rootConfig` — parsed root `hive.config.yaml`
 - `consumerConfig` — parsed `.pHive/hive.config.yaml` or `None`
 - `graduationRegistry` — parsed graduation registry workflow list or `None`
@@ -69,7 +69,7 @@ Branch on `mode_decision`:
 
 - **`multica`** → route through the DAG front door (see **Phase 0b** below) and **stop**. Do not continue to Phase 1 below.
 - **`cc-workflows`** → hand off to `skills/hive/skills/review-mode-cc-workflows/SKILL.md` (forward all arguments + `field_sources`) and **stop**. Do not continue to Phase 1 below.
-- **any other value** (`sequential`, `team`, `team-cmux`, `sessions`, `sandcastle`) → continue inline with the steps below. The solo reviewer pattern (Steps 1–6) is the authoritative inline path.
+- **any other value** (`sequential`, `team`, `sessions`, `sandcastle`) → continue inline with the steps below. The solo reviewer pattern (Steps 1–6) is the authoritative inline path.
 
 > `review-mode-cc-workflows` is a forward declaration — its skill file ships in a later slice. A missing skill file is not an error at dispatch resolution time.
 
