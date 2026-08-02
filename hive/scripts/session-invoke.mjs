@@ -31,7 +31,7 @@ const sessionClient = require(path.join(LIB_DIR, 'session-client.js'));
 const sessionSseReader = require(path.join(LIB_DIR, 'session-sse-reader.js'));
 const sessionRegistry = require(path.join(LIB_DIR, 'session-registry.js'));
 const sessionEpisodeWriter = require(path.join(LIB_DIR, 'session-episode-writer.js'));
-const sessionPromptBuilder = require(path.join(LIB_DIR, 'session-prompt-builder.js'));
+const sessionPromptBuilder = await import(path.join(LIB_DIR, 'session-prompt-builder.js'));
 const sessionTurnBuilder = require(path.join(LIB_DIR, 'session-turn-builder.js'));
 
 // ─── Exit code map ────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ async function main() {
   // 3. Build prompt content
   let content;
   try {
-    content = sessionPromptBuilder.buildPrompt({ story_context, epic_id, matched_specialists });
+    content = await sessionPromptBuilder.buildPrompt({ story_context, epic_id, matched_specialists });
   } catch (err) {
     process.stderr.write(`ERROR: prompt builder failed: ${err.message}\n`);
     process.exit(1);

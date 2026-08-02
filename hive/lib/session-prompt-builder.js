@@ -14,17 +14,19 @@
  *     Messages-API loop and the Sessions-API cloud adapter.
  */
 
-'use strict';
-
-const path = require('path');
-const os = require('os');
-const { execSync } = require('child_process');
+import path from 'node:path';
+import os from 'node:os';
+import { execSync } from 'node:child_process';
 
 const MAX_CHARS = 4000;
 const KG_SQLITE_PATH = path.join(os.homedir(), '.claude', 'hive', 'kg.sqlite');
 const ENTITY_ALLOWLIST = /^[a-zA-Z0-9\-_]+$/;
 const SYSTEM_PROMPT_BUDGET_DEFAULT = 4000; // matches tokens.system_prompt_budget per spec §3 (chars proxy for now)
 const REFERENCE_TRUNCATE_CHARS = 200;
+const MEMORY_RECALL_HITS = 3;
+const MEMORY_RECALL_MIN_SCORE = 0.45;
+const MEMORY_RECALL_TIMEOUT_MS = 800;
+const MEMORY_BUNDLE_MAX_CHARS = Math.min(1200, SYSTEM_PROMPT_BUDGET_DEFAULT);
 
 /**
  * Query KG decisions for a given epic.
@@ -52,6 +54,76 @@ function queryDecisions(epicId) {
   }
 }
 
+function storyTopic(storyContext) {
+  return (storyContext || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+function repoScopeFromStory(storyContext) {
+  const match = String(storyContext || '').match(/^target_repo:\s*([^\s]+)\s*$/mi);
+  return match ? match[1] : '';
+}
+
+function truncateMemoryText(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return '';
+  return clean.length <= MEMORY_BUNDLE_MAX_CHARS
+    ? clean
+    : clean.slice(0, MEMORY_BUNDLE_MAX_CHARS).trimEnd();
+}
+
+function extractRecallText(data) {
+  if (typeof data?.bundle?.text === 'string') return truncateMemoryText(data.bundle.text);
+  if (typeof data?.text === 'string') return truncateMemoryText(data.text);
+  return '';
+}
+
+function appendWithinPromptBudget(content, block) {
+  if (!block) return content;
+  const combined = content + block;
+  if (combined.length <= MAX_CHARS) return combined;
+
+  const remaining = MAX_CHARS - content.length;
+  if (remaining > 50) return content + block.slice(0, remaining);
+  return content;
+}
+
+async function recallMemoryBundle(storyContext) {
+  if (process.env.MNEMOSYNE_RECALL === '0') return '';
+
+  const query = storyTopic(storyContext);
+  if (!query || typeof fetch !== 'function') return '';
+
+  const baseUrl = (process.env.MNEMOSYNE_URL || 'http://127.0.0.1:8477').replace(/\/+$/, '');
+  const scope = process.env.HIVE_MEMORY_SCOPE
+    || process.env.SWARM_MEMORY_SCOPE
+    || repoScopeFromStory(storyContext);
+  const body = {
+    query,
+    hits: MEMORY_RECALL_HITS,
+    min_score: MEMORY_RECALL_MIN_SCORE,
+  };
+  if (scope) body.scope = scope;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MEMORY_RECALL_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${baseUrl}/recall`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) return '';
+
+    const data = await response.json();
+    return extractRecallText(data);
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Build the prompt content string for the first user.message.
  *
@@ -59,12 +131,17 @@ function queryDecisions(epicId) {
  * @param {string} params.story_context - full story spec text (required)
  * @param {string} [params.epic_id] - used for KG query
  * @param {Array}  [params.matched_specialists] - specialist objects from payload
- * @returns {string} assembled content string, capped at MAX_CHARS
+ * @returns {Promise<string>} assembled content string, capped at MAX_CHARS
  */
-function buildPrompt({ story_context, epic_id, matched_specialists = [] }) {
+async function buildPrompt({ story_context, epic_id, matched_specialists = [] }) {
   if (!story_context) throw new Error('buildPrompt: story_context is required');
 
   let content = story_context;
+
+  const memoryText = await recallMemoryBundle(story_context);
+  if (memoryText) {
+    content = appendWithinPromptBudget(content, `\n\n## Recalled Memory\n${memoryText}`);
+  }
 
   // Append specialist block if any (cap enforced in session-turn-builder)
   if (matched_specialists && matched_specialists.length > 0) {
@@ -79,18 +156,7 @@ function buildPrompt({ story_context, epic_id, matched_specialists = [] }) {
   if (epic_id) {
     const kgBlock = queryDecisions(epic_id);
     if (kgBlock) {
-      const combined = content + kgBlock;
-      if (combined.length <= MAX_CHARS) {
-        content = combined;
-      } else {
-        // Truncate KG block to fit within cap
-        const remaining = MAX_CHARS - content.length;
-        if (remaining > 50) {
-          // Enough room for at least a partial KG block header
-          content = content + kgBlock.slice(0, remaining);
-        }
-        // If no room, skip KG entirely — story_context always wins
-      }
+      content = appendWithinPromptBudget(content, kgBlock);
     }
   }
 
@@ -303,7 +369,7 @@ function buildSystemPrompt({
   return { system };
 }
 
-module.exports = {
+export {
   buildPrompt,
   queryDecisions,
   buildSystemPrompt,
