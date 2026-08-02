@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+import { inject as injectMnemosyneBundle } from '../../../mnemosyne/hooks/pre-recall.mjs';
+
 const HTTP_TIMEOUT_MS = 30_000;
 const USER_AGENT = 'hive-multica-story-dispatch/0.1.0';
 const SQUAD_OUTCOME_VALUES = new Set(['action', 'no_action', 'failed']);
@@ -331,11 +333,20 @@ export async function fetchPriorExperienceSection(persona, epic, storyId, option
 // (shelling to Python for prior-experience memories).
 export async function buildStoryBrief(story, options = {}) {
   const storyQuery = [story?.title, story?.description].filter(Boolean).join(' \u2014 ');
-  const priorExperienceSection = await fetchPriorExperienceSection(
-    options.dispatchingPersona,
-    story?.epic,
-    story?.id,
-    { tokenBudget: options.memoryTokenBudget, pythonBin: options.pythonBin, query: storyQuery },
+  const priorExperienceSection = await injectMnemosyneBundle(
+    {
+      ...story,
+      persona: options.dispatchingPersona,
+      query: storyQuery,
+      memoryTokenBudget: options.memoryTokenBudget,
+    },
+    options.repoScope ?? null,
+    {
+      persona: options.dispatchingPersona,
+      tokenBudget: options.memoryTokenBudget,
+      pythonBin: options.pythonBin,
+      query: storyQuery,
+    },
   );
   return serializeStoryBrief(story, { ...options, priorExperienceSection });
 }
@@ -430,6 +441,9 @@ export async function dispatchStoryToPersonas(
     agents = [],
     agentBackends = options.agent_backends ?? {},
     integrationBranch = null,
+    repoScope = null,
+    memoryTokenBudget = null,
+    pythonBin = undefined,
     moveOutOfBacklog = true,
   } = options;
   // Routing-contract rendering must reflect the actual agent the issue is assigned to.
@@ -463,6 +477,9 @@ export async function dispatchStoryToPersonas(
       agents: briefAgents,
       agentBackends,
       integrationBranch,
+      repoScope,
+      memoryTokenBudget,
+      pythonBin,
     });
     const briefResult = await ensureIssueBriefMatches(serverUrl, token, workspaceId, issueUuid, brief);
     const issue = await dispatchStoryToAgent(serverUrl, token, workspaceId, issueUuid, agentUuid);
