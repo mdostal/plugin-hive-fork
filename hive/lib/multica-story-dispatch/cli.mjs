@@ -14,7 +14,6 @@ import {
   reconcileBranch,
   renderIntegrationContract,
   resetIssueForRerun,
-  fetchPriorExperienceSection,
 } from './index.mjs';
 
 import { pollTaskUntilTerminal, writeMulticaRunEpisode } from './episode-sync.mjs';
@@ -23,6 +22,8 @@ import {
   writeHermesReconcilerState,
   VALID_GATE_STATES,
 } from '../hermes-reconciler/state.mjs';
+import { inject as injectMnemosyneBundle } from '../../../mnemosyne/hooks/pre-recall.mjs';
+import { bundleStats, replaceInjectedBundle } from '../../../mnemosyne/hooks/format.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HTTP_TIMEOUT_MS = 30_000;
@@ -441,13 +442,13 @@ async function cmdDispatch(args, cfg) {
     }
   }
 
-  // Persona stamp + Prior Experience injection (rev1-multica-learning-loop FIX 1):
+  // Persona stamp + Mnemosyne recall injection (rev1-multica-learning-loop FIX 1,
+  // PAN-7194 live-path upgrade):
   // this is the production dispatch route (multica_dispatch_story → cmdDispatch),
-  // which previously sent the existing issue body unchanged. Without the stamp,
-  // S2 harvest can't attribute a memory to the dispatched persona; without the
-  // Prior Experience section, a later story dispatched via this route never sees
-  // an earlier story's learning. Only applies to agent dispatch — the persona
-  // concept is the assigned agent's name; squad dispatch has no single persona.
+  // which must update the issue context before assignment so every backend
+  // receives the same runner-agnostic bundle. Only applies to agent dispatch —
+  // the persona concept is the assigned agent's name; squad dispatch has no
+  // single persona.
   if (requestedType === 'agent') {
     const persona = agentName;
     const stampRe = /<!--\s*persona:\s*.+?\s*-->\n*/;
@@ -457,26 +458,37 @@ async function cmdDispatch(args, cfg) {
       descChanged = true;
     }
 
-    const priorSection = await fetchPriorExperienceSection(
-      persona,
-      typeof args.epic === 'string' ? args.epic : null,
-      typeof args['story-id'] === 'string' ? args['story-id'] : null,
-      { pythonBin: typeof args['python-bin'] === 'string' ? args['python-bin'] : undefined },
+    const mnemosyneBundle = await injectMnemosyneBundle(
+      {
+        id: typeof args['story-id'] === 'string' ? args['story-id'] : null,
+        epic: typeof args.epic === 'string' ? args.epic : null,
+        persona,
+        description: currentDesc,
+      },
+      typeof args['repo-scope'] === 'string' ? args['repo-scope'] : null,
+      {
+        persona,
+        pythonBin: typeof args['python-bin'] === 'string' ? args['python-bin'] : undefined,
+        tokenBudget: typeof args['memory-token-budget'] === 'string' ? args['memory-token-budget'] : undefined,
+      },
     );
-    const sectionRe = /\n*## Prior Experience\n[\s\S]*?(?=\n## |\n---\n|$)/;
-    const hasExistingSection = /## Prior Experience\n/.test(currentDesc);
-
-    if (priorSection && !currentDesc.includes(priorSection.trim())) {
-      currentDesc = currentDesc.replace(sectionRe, '');
-      const insightIdx = currentDesc.indexOf('## Insight Capture');
-      currentDesc =
-        insightIdx >= 0
-          ? `${currentDesc.slice(0, insightIdx)}${priorSection.trim()}\n\n${currentDesc.slice(insightIdx)}`
-          : `${currentDesc.trimEnd()}\n\n${priorSection.trim()}\n`;
+    const nextDesc = replaceInjectedBundle(currentDesc, mnemosyneBundle);
+    if (nextDesc !== currentDesc) {
+      currentDesc = nextDesc;
       descChanged = true;
-    } else if (!priorSection && hasExistingSection) {
-      currentDesc = currentDesc.replace(sectionRe, '');
-      descChanged = true;
+    }
+    if (args['log-mnemosyne-bundle'] && mnemosyneBundle) {
+      const stats = bundleStats(mnemosyneBundle);
+      console.error(
+        JSON.stringify({
+          event: 'mnemosyne_bundle_injected',
+          issue_id: issueUuid,
+          persona,
+          runner_backend: args.backend ?? args.runner ?? null,
+          ...stats,
+          block: mnemosyneBundle.trimEnd(),
+        }),
+      );
     }
   }
 

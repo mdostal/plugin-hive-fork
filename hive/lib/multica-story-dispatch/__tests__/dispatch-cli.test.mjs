@@ -534,11 +534,11 @@ test('dispatch: spent issue with --rerun resets and reports redispatched with a 
   }
 });
 
-test('dispatch: production route (cmdDispatch) stamps persona + injects Prior Experience section', async (t) => {
+test('dispatch: production route (cmdDispatch) stamps persona + injects Mnemosyne bundle before assignment', async (t) => {
   // rev1-multica-learning-loop FIX 1: multica_dispatch_story → cmdDispatch is the
   // real story-execution route (not the plan-mode fan-out that buildStoryBrief
-  // already covered) — it must also carry the persona stamp + Prior Experience
-  // section so S2 harvest can attribute memories and later stories in the same
+  // already covered) — it must also carry the persona stamp + Mnemosyne bundle
+  // so S2 harvest can attribute memories and later stories in the same
   // epic see earlier learnings when dispatched through this path.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dispatch-cli-prior-exp-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
@@ -590,11 +590,13 @@ test('dispatch: production route (cmdDispatch) stamps persona + injects Prior Ex
   });
 
   try {
-    const { stdout } = await runCli(
+    const { stdout, stderr } = await runCli(
       [
         'dispatch', '--issue', ISSUE_UUID, '--agent', 'developer',
         '--epic', 'multica-learning-loop', '--story-id', 's-b',
         '--python-bin', fakePython,
+        '--repo-scope', 'mdostal/plugin-hive-fork',
+        '--log-mnemosyne-bundle',
       ],
       serverUrl,
     );
@@ -604,9 +606,18 @@ test('dispatch: production route (cmdDispatch) stamps persona + injects Prior Ex
     assert.ok(putBody, 'a PUT with an updated description must fire');
     assert.match(putBody, /<!-- persona: developer -->/);
     assert.match(putBody, /## Prior Experience/);
+    assert.match(putBody, /<!-- mnemosyne-bundle: source=mnemosyne scope="mdostal\/plugin-hive-fork" persona="developer" estimated_tokens=\d+ chars=\d+ -->/);
     assert.match(putBody, /widget-cache-fix/);
+    assert.ok(putBody.indexOf('## Goal') < putBody.indexOf('## Prior Experience'));
     // Prior Experience must land before Insight Capture, mirroring serializeStoryBrief's section order.
     assert.ok(putBody.indexOf('## Prior Experience') < putBody.indexOf('## Insight Capture'));
+    const evidence = JSON.parse(stderr.trim());
+    assert.equal(evidence.event, 'mnemosyne_bundle_injected');
+    assert.equal(evidence.issue_id, ISSUE_UUID);
+    assert.equal(evidence.persona, 'developer');
+    assert.ok(evidence.estimated_tokens > 0);
+    assert.match(evidence.block, /## Prior Experience/);
+    assert.match(evidence.block, /widget-cache-fix/);
   } finally {
     await close();
   }

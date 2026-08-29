@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { __resetCache, dispatchStoryToPersonas } from '../index.mjs';
@@ -202,6 +205,89 @@ test('dispatchStoryToPersonas renders persona briefs with backend-split mapping'
     assert.doesNotMatch(descriptions.get('issue-researcher'), /\/codex:rescue/);
     assert.doesNotMatch(descriptions.get('issue-tester'), /\/codex:rescue/);
     assert.match(descriptions.get('issue-reviewer'), /^## Use \/codex:rescue/m);
+  } finally {
+    await close();
+  }
+});
+
+test('dispatchStoryToPersonas injects same Mnemosyne bundle shape for codex and claude runners', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dispatch-carrier-mnemosyne-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const fakePython = path.join(dir, 'fake-python.sh');
+  await fs.writeFile(
+    fakePython,
+    '#!/bin/sh\nprintf \'## Prior Experience\\n\\n### Recalled Knowledge (semantic corpus)\\n- **[dispatch.md]** shared dispatch cache context\\n\'\n',
+    { mode: 0o755 },
+  );
+
+  const descriptions = new Map();
+  const agents = [
+    { id: 'agent-codex-dev', name: 'codex-dev', provider: 'codex' },
+    { id: 'agent-claude-dev', name: 'claude-dev', provider: 'claude' },
+  ];
+
+  const { serverUrl, close } = await startMockServer((req, res, body) => {
+    if (req.method === 'GET' && req.url === '/api/agents?workspace_id=workspace-1') {
+      sendJson(res, 200, agents);
+      return;
+    }
+
+    const match = req.url.match(/^\/api\/issues\/([^?]+)\?workspace_id=workspace-1$/);
+    if (!match) {
+      sendJson(res, 500, { error: `unexpected request: ${req.method} ${req.url}` });
+      return;
+    }
+
+    const issueId = decodeURIComponent(match[1]);
+    if (req.method === 'GET') {
+      sendJson(res, 200, { id: issueId, description: 'old', status: 'todo' });
+      return;
+    }
+
+    if (req.method === 'PUT') {
+      if (body.description) descriptions.set(issueId, body.description);
+      sendJson(res, 200, { id: issueId, ...body });
+      return;
+    }
+
+    sendJson(res, 500, { error: `unexpected method: ${req.method}` });
+  });
+
+  try {
+    await dispatchStoryToPersonas(
+      serverUrl,
+      'mul_test',
+      'workspace-1',
+      story(),
+      {
+        'codex-dev': 'issue-codex',
+        'claude-dev': 'issue-claude',
+      },
+      {
+        agents,
+        agentBackends: { 'codex-dev': 'codex', 'claude-dev': 'claude' },
+        repoScope: 'mdostal/plugin-hive-fork',
+        pythonBin: fakePython,
+      },
+    );
+
+    const codexBrief = descriptions.get('issue-codex');
+    const claudeBrief = descriptions.get('issue-claude');
+
+    for (const brief of [codexBrief, claudeBrief]) {
+      assert.match(brief, /## Prior Experience/);
+      assert.match(brief, /<!-- mnemosyne-bundle: source=mnemosyne scope="mdostal\/plugin-hive-fork" persona="[^"]+" estimated_tokens=\d+ chars=\d+ -->/);
+      assert.match(brief, /### Recalled Knowledge \(semantic corpus\)/);
+      assert.match(brief, /shared dispatch cache context/);
+      assert.ok(brief.indexOf('## Goal') < brief.indexOf('## Prior Experience'));
+      assert.ok(brief.indexOf('## Prior Experience') < brief.indexOf('## Insight Capture'));
+    }
+
+    const normalizePersona = (brief) => brief
+      .replace(/<!-- persona: [^>]+ -->/, '<!-- persona: <runner> -->')
+      .replace(/persona="[^"]+"/, 'persona="<runner>"');
+    assert.equal(normalizePersona(codexBrief), normalizePersona(claudeBrief));
   } finally {
     await close();
   }
