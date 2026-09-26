@@ -208,6 +208,15 @@ agent_backends:
   # hard-fails if Codex hits its usage limit (the failure that triggered the 2026-06-28
   # switch to Claude). Verify Codex credit health before relying on this; disable the
   # external_models.codex `codex-review` node if a single Codex pass is intended.
+  #
+  # ---- Runner-agnostic OpenAI-compat backends (openai-compat-backend.mjs, 2026-07-31) ----
+  # Spread REVIEW-tier personas off the throttled Claude account onto owned lanes: Kimi K3
+  # through OpenRouter, Gemini through Google's OpenAI-compat surface (our paid GEMINI_API_KEY).
+  # Read-only review roles only; Claude stays the primary creator/orchestrator + fallback.
+  # Token grammar:  gemini | gemini:<model> | openrouter:<model> | kimi (alias -> moonshotai/kimi-k3)
+  # Uncomment to enable (requires OPENROUTER_API_KEY / GEMINI_API_KEY exported):
+  #   security-reviewer: gemini       # gemini-3.1-pro-preview via paid GEMINI_API_KEY
+  #   performance-reviewer: kimi      # moonshotai/kimi-k3 via OpenRouter credit
 
 # Circuit breakers — prevent wasted time and tokens
 circuit_breakers:
