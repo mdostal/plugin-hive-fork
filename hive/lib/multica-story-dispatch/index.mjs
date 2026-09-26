@@ -152,15 +152,30 @@ export function __resetCache() {
   AGENT_CACHE.clear();
 }
 
+// OpenAI-compatible direct-HTTP backends (openai-compat-backend.mjs). These are
+// the runner-agnostic sibling of the direct `codex` subprocess tier: instead of
+// dispatching to a Multica runtime, the caller shells the story/review prompt to
+// an OpenAI-compatible /chat/completions endpoint (OpenRouter for Kimi K3 & 300+
+// models; Google's OpenAI-compat surface for Gemini via our paid GEMINI_API_KEY).
+// Token grammar: 'gemini' | 'gemini:<model>' | 'openrouter:<model>' | 'kimi' alias.
+const OPENAI_COMPAT_ALIASES = { kimi: 'openrouter:moonshotai/kimi-k3', 'kimi-k3': 'openrouter:moonshotai/kimi-k3' };
+function isOpenAICompatBackend(s) {
+  return s === 'gemini' || s.startsWith('gemini:') || s.startsWith('openrouter:');
+}
+
 // Normalize a raw agent_backends entry to a canonical backend token.
 // 'opencode' is a convenience alias for 'multica:opencode'.
+// 'kimi'/'kimi-k3' alias to 'openrouter:moonshotai/kimi-k3'.
 // Returns one of: 'claude' | 'codex' | 'multica:<runtime>'
+//                 | 'gemini' | 'gemini:<model>' | 'openrouter:<model>'
 // Unknown or absent values fall back to 'claude'.
 function resolveBackend(rawBackend) {
   if (rawBackend == null) return 'claude';
-  const s = String(rawBackend).trim();
+  let s = String(rawBackend).trim();
+  if (OPENAI_COMPAT_ALIASES[s]) s = OPENAI_COMPAT_ALIASES[s];
   if (s === 'opencode') return `${MULTICA_RUNTIME_PREFIX}opencode`;
   if (s === 'claude' || s === 'codex' || s.startsWith(MULTICA_RUNTIME_PREFIX)) return s;
+  if (isOpenAICompatBackend(s)) return s;
   return 'claude';
 }
 

@@ -5,7 +5,9 @@
   "scripts": {
     "approval-server": "node hive/lib/approval/server.mjs",
     "approval-mcp": "node hive/lib/approval/mcp-server.mjs",
-    "approval-inject-ruleset": "node hive/lib/approval/inject-ruleset.mjs"
+    "approval-inject-ruleset": "node hive/lib/approval/inject-ruleset.mjs",
+    "test": "node --test \"hive/lib/handoff/__tests__/**/*.test.mjs\" \"hive/lib/multica-story-dispatch/__tests__/**/*.test.mjs\"",
+    "test:all": "node --test \"hive/**/*.test.mjs\""
   },
   "engines": {
     "node": ">=20.19"
