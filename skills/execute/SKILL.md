@@ -166,7 +166,7 @@ Describe each story as a named teammate in the team prompt; the runtime material
 
    > **v1 note:** v1 routing handles `workflow`-based catalog entries only. A catalog entry with `skill: <path>` (allowed by catalog schema but unused in v1) is not reached by condition (i) and falls to condition (ii) or (iii). Skill-based routing is a Phase 6 extension point.
 
-5. **Choose execution mode.** Invoke `skills/hive/skills/execute-dispatch/SKILL.md` with env, parsed root `hive.config.yaml`, parsed consumer `${HIVE_STATE_DIR}/hive.config.yaml`, parsed graduation registry, `workflow_name`, `$ARGUMENTS`, and `unblocked_stories[]` — the depth-0 ready stories from the topological sort in step 4. Each story payload includes `id`, `parallel_allowed`, `parallel_rationale`, and (for `bounded-slice` rationale) `files_to_modify[]`. Consume `mode_decision`, `mode_reason`, `gate_violations[]`, `runner_path`, and `runner_reason`.
+5. **Choose execution mode.** Invoke `skills/hive/skills/execute-dispatch/SKILL.md` with env, parsed root `hive.config.yaml`, parsed consumer `${HIVE_STATE_DIR}/hive.config.yaml`, parsed graduation registry, `workflow_name`, `$ARGUMENTS`, and `unblocked_stories[]` — the depth-0 ready stories from the topological sort in step 4. Each story payload includes `id`, `parallel_allowed`, `parallel_rationale`, and (for `bounded-slice` rationale) `files_to_modify[]`. Also pass `capabilities.named_teammate_spawn`: `true` only if your own `Agent` tool schema declares a `name` parameter; when it does not, dispatch routes `team` to `cc-workflows` (`mode_reason=named-teammate-spawn-unavailable`). Consume `mode_decision`, `mode_reason`, `gate_violations[]`, `runner_path`, and `runner_reason`.
 
    When `gate_violations[]` is non-empty, the dispatch has been downgraded to `sequential` by the parallel-dispatch gate (`ed-7`). Surface the warning to stdout naming every offending story ID and the reason recorded by the gate (the structured format is documented in `execute-dispatch/SKILL.md` Step 1.5). Do not re-implement the gate logic here — the dispatch skill is the single boundary for this decision per the parallel-call-sites registry (`hive/references/parallel-call-sites.md`).
 
@@ -218,7 +218,7 @@ Completion here is a convention, not a gate: no tool boundary lets a hook interc
 
 **Local fallback (backend unset).** When `mode_decision != multica`, this step is skipped entirely. Existing paths (sessions → 6c, team-cmux → 6b, team → 6, sequential → 7, sandcastle → 6d, cc-workflows → 6f) are unchanged — no regression.
 
-6. **Agent team execution.** Follow **`references/team-execution.md`** for the full `Agent(name:)` prompt template, per-story commit pattern, sidecar injection for append-placement triggers, and respawn monitoring.
+6. **Agent team execution.** Follow **`references/team-execution.md`** for the full `Agent(name:)` prompt template, per-story commit pattern, sidecar injection for append-placement triggers, and respawn monitoring. Requires `Agent(name:)`; without it dispatch returns `cc-workflows` (step 6f) instead — see that reference's **Named-teammate fallback**.
 
 6b. **Agent team execution (cmux path).** Use this path when all four step-5 conditions are true and `execution.terminal_mux` resolves to `cmux`.
    Invoke `skills/hive/skills/execute-mode-team-cmux/SKILL.md` with:
@@ -252,7 +252,7 @@ Completion here is a convention, not a gate: no tool boundary lets a hook interc
    - `epic_handle`: the current epic identifier
    - `hive_config`: parsed root `hive.config.yaml` (for `execution.multica.*` options and `agent_backends.*`)
 
-6f. **CC Workflows execution** (used when `HIVE_EXECUTION_RUNTIME=workflows` or root config `execution.runtime: cc-workflows`). Routes each story into a Workflow tool dispatch.
+6f. **CC Workflows execution** (used when `HIVE_EXECUTION_RUNTIME=cc-workflows`, root config `execution.runtime: cc-workflows`, or the named-teammate fallback when `Agent(name:)` is unavailable). Routes each story into a Workflow tool dispatch.
    Invoke `skills/hive/skills/execute-mode-cc-workflows/SKILL.md` with:
    - `workflow_path`: the workflow loaded in step 3
    - `unblocked_stories[]`: the depth-0 ready stories from the topological sort

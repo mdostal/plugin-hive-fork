@@ -72,6 +72,21 @@ if [ -n "$resolved_state_dir" ]; then
   fi
 fi
 story_regex="(${state_dir_alternatives})/epics/[^/]+/stories/[^/]+\.yaml"
+
+# Execution-language checks (Pattern 1's workflow signals, Pattern 2) run on
+# the prompt with state-dir path segments blanked out. Path text such as
+# `.pHive/epics/<id>/evals` or `state/epics/<id>/execution-log.md` is a file
+# reference, not execution language: without this, `execute.*epic` matched a
+# lone "execute" verb plus the `epics/` directory name in a legitimate prompt
+# ("execute NOTHING ... gitleaks dir .pHive/epics/audit-suite-v1/evals").
+# A segment starts at a state-dir name preceded by start-of-line or a
+# non-word character (so absolute and ./ prefixes are covered) and runs to
+# the next whitespace, quote, or backtick.
+# Story-path DETECTION (Pattern 1 below) still uses the raw prompt.
+state_dir_sed_alternatives=$(printf '%s' "$state_dir_alternatives" | sed -e 's/#/\\#/g')
+prompt_prose=$(printf '%s\n' "$prompt" \
+  | sed -E "s#(^|[^A-Za-z0-9_-])(${state_dir_sed_alternatives})/[^[:space:]\"'\`]*#\\1<state-path>#g")
+
 if echo "$prompt" | grep -qiE "$story_regex"; then
   # Check if it's a single story being fully delegated
   story_count=$(echo "$prompt" | grep -oiE "$story_regex" | sort -u | wc -l | tr -d ' ')
@@ -83,7 +98,7 @@ if echo "$prompt" | grep -qiE "$story_regex"; then
     # legitimate single-step prompts that merely reference a story file. Collapsed
     # do-everything prompts are still caught by the multi-phase/multi-verb signals
     # below (workflow+phase, research+implement+test, review+integrate).
-    if echo "$prompt" | grep -qiE '(workflow.*phase|development.*workflow|research.*implement.*test|review.*integrate)'; then
+    if echo "$prompt_prose" | grep -qiE '(workflow.*phase|development.*workflow|research.*implement.*test|review.*integrate)'; then
       echo "BLOCKED: Agent tool used to execute story-level work. Use natural-language teammate spawn instead: describe the team and each teammate's tasks in your prompt" >&2
       echo "Detected $story_count story reference(s) with workflow execution patterns." >&2
       exit 2
@@ -91,8 +106,9 @@ if echo "$prompt" | grep -qiE "$story_regex"; then
   fi
 fi
 
-# Pattern 2: Agent prompt contains epic execution language
-if echo "$prompt" | grep -qiE '(execute.*epic|epic.*execution|execute all stories|run the stories)'; then
+# Pattern 2: Agent prompt contains epic execution language (path segments
+# under the state dir are blanked first — see prompt_prose above).
+if echo "$prompt_prose" | grep -qiE '(execute.*epic|epic.*execution|execute all stories|run the stories)'; then
   echo "BLOCKED: Agent tool used for epic-level execution. Use natural-language teammate spawn instead: describe the team and each teammate's tasks in your prompt" >&2
   exit 2
 fi

@@ -11,7 +11,7 @@ Atomic skill, NOT inline `/execute` prose. It resolves the pre-execution dispatc
 
 Call this skill once at the single `/execute` dispatch point where the caller has both the story execution context and the current workflow handoff context.
 
-**Inputs:** `env` with `HIVE_SESSIONS_ENABLED`, `HIVE_PARALLEL_TEAMS`, `HIVE_TERMINAL_MUX`, and `HIVE_EXECUTION_MODE`; parsed root `hive.config.yaml` containing `sessions.enabled`, `parallel_teams` or `execution.parallel_teams`, and `execution.terminal_mux`; parsed consumer `.pHive/hive.config.yaml` or `None`; parsed graduation registry workflow list or `None`; `workflow_name`; `epic_id` when known; `arguments` containing the `--sequential` flag state plus dependency-depth summary; and `unblocked_stories[]` — the depth-0 ready stories at this dispatch tick, each carrying at minimum `id`, `parallel_allowed`, `parallel_rationale`, and (for `parallel_rationale: bounded-slice`) `files_to_modify[]` whose entries name the declared touch-set. Empty or single-element `unblocked_stories[]` is valid: the parallel-dispatch gate (Step 1.5) skips when there is no peer set to gate.
+**Inputs:** `env` with `HIVE_SESSIONS_ENABLED`, `HIVE_PARALLEL_TEAMS`, `HIVE_TERMINAL_MUX`, and `HIVE_EXECUTION_MODE`; parsed root `hive.config.yaml` containing `sessions.enabled`, `parallel_teams` or `execution.parallel_teams`, and `execution.terminal_mux`; parsed consumer `.pHive/hive.config.yaml` or `None`; parsed graduation registry workflow list or `None`; `workflow_name`; `epic_id` when known; `arguments` containing the `--sequential` flag state plus dependency-depth summary; and `unblocked_stories[]` — the depth-0 ready stories at this dispatch tick, each carrying at minimum `id`, `parallel_allowed`, `parallel_rationale`, and (for `parallel_rationale: bounded-slice`) `files_to_modify[]` whose entries name the declared touch-set. Empty or single-element `unblocked_stories[]` is valid: the parallel-dispatch gate (Step 1.5) skips when there is no peer set to gate. Optional `capabilities.named_teammate_spawn` (boolean): whether the calling runtime can spawn a named teammate, i.e. the caller's `Agent` tool schema declares a `name` parameter (`Agent(name:)`). The caller determines it by inspecting its own `Agent` tool schema at dispatch time; absent means `true` (pre-fallback behavior).
 
 **Outputs:** `mode_decision` enum `sessions | team | team-cmux | sequential | sandcastle | multica | cc-workflows`; `mode_reason` as a one-line string explaining the selected mode; `runner_path` enum `hive-dag | orchestrator-narrated`; `runner_reason` as a one-line string explaining the selected runner path; `field_sources` map covering `sessions_enabled`, `parallel_teams`, `terminal_mux`, `executor`, `execution_mode`, and `execution_runtime` so callers can attribute every resolution; `field_sources.execution_runtime.epic_override` as a `<path>` traceability field when a per-epic disposition file overrode the auto heuristic, otherwise `null`; and `gate_violations[]` — a list of `{story_id, reason}` records emitted by Step 1.5 when the parallel-dispatch gate refuses fan-out. `gate_violations[]` is `[]` on healthy runs and on any `mode_decision` other than `team | team-cmux | sessions | sandcastle | multica | cc-workflows`.
 
@@ -131,7 +131,8 @@ if resolved_runtime != "auto" and runtime_source != "default":
   # Map the runtime value directly to the corresponding mode_decision and skip
   # both the per-epic override path and the auto heuristic below.
   field_sources.execution_runtime.epic_override = null
-  if resolved_runtime == "workflows":
+  if resolved_runtime in ("cc-workflows", "workflows"):
+    # The resolver's recognized token is "cc-workflows"; legacy "workflows" kept for compat.
     mode_decision = "cc-workflows"
   elif resolved_runtime == "multica":
     mode_decision = "multica"
@@ -167,9 +168,12 @@ Evaluate in this order and stop at the first selected path:
 3. If the dependency-depth summary does not show multiple stories at the same depth, return `mode_decision=sequential` and `mode_reason=no-peer-depth`.
 4. If `--sequential` is present in `arguments`, return `mode_decision=sequential` and `mode_reason=sequential-flag`.
 5. When the resolved `terminal_mux` field (from Step 0, env > config > default) equals `cmux`, return `mode_decision=team-cmux` and `mode_reason=team-checks-pass-cmux`.
-6. Otherwise return `mode_decision=team` and `mode_reason=team-checks-pass`.
+6. If `capabilities.named_teammate_spawn` is `false`, return `mode_decision=cc-workflows` and `mode_reason=named-teammate-spawn-unavailable` (see **Named-teammate fallback** below).
+7. Otherwise return `mode_decision=team` and `mode_reason=team-checks-pass`.
 
-This preserves precedence: `sessions > team-cmux > team > sequential`.
+This preserves precedence: `sessions > team-cmux > team | cc-workflows (fallback) > sequential`.
+
+**Named-teammate fallback.** The `team` path (`/execute` step 6, `skills/execute/references/team-execution.md`) spawns one named teammate per story via `Agent(name:)`, and `hooks/check-agent-misuse.sh` allows story/epic-level `Agent` prompts only through that named surface. When the runtime's `Agent` tool has no `name` parameter, a team-template prompt ("Execute story ... of the ... epic") is blocked by the hook, so `team` cannot succeed; route the same peer set to `cc-workflows` (Workflow tool, `execute-mode-cc-workflows`) instead; if the Workflow tool is also absent, the caller runs the peer set through `sequential` (step 7). `team-cmux` and `sequential` do not depend on `Agent(name:)` and are unaffected. Operators can pin this choice without detection via the existing runtime knob `HIVE_EXECUTION_RUNTIME=cc-workflows` (explicit-runtime branch above). When the fallback fires, emit `WARNING: named-teammate spawn (Agent(name:)) unavailable in this runtime — routing team dispatch to cc-workflows.` alongside the INFO line.
 
 ### Step 1.5: Parallel-Dispatch Gate (ed-7)
 
